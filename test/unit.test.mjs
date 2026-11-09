@@ -51,7 +51,7 @@ function fakeSdk(script) {
       state.sends.push({ message, options, agentId: this.agentId });
       const b = script.shift() ?? {};
       if (b.throwOnSend) throw new Error(b.throwOnSend);
-      if (b.callTool) b.toolResult = await options.local.customTools[b.callTool].execute({ text: "hi" }, {});
+      if (b.callTool) b.toolResult = await options.local.customTools[b.callTool].execute(b.callArgs ?? { text: "hi" }, {});
       const run = new FakeRun(b);
       state.runs.push(run);
       return run;
@@ -258,6 +258,31 @@ test("execute: only allowed OpenClaw tools are registered and calls carry the tu
       assert.ok(seen.some((s) => s.method === "tools/call"));
     }
     assert.ok(seen.length > 0 && seen.every((s) => s.auth === "Bearer turn-1"));
+    // message(final:true) delivered: the turn ends at once with NO_REPLY and the
+    // still-running Cursor run (the NO_REPLY wrap-up call) is cancelled.
+    {
+      const { sdk, state } = fakeSdk([{ callTool: "message", callArgs: { action: "send", message: "答复", final: true }, events: [{ type: "tool_call", name: "mcp", call_id: "m1", status: "completed" }], hang: true }]);
+      const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }) });
+      const out = await collect(exec(baseCtx({ args, openClawAllow: new Set(["message"]) })));
+      assert.equal(out.at(-1).type, "result");
+      assert.equal(out.at(-1).result, "NO_REPLY");
+      assert.equal(state.runs[0].cancelled, true);
+    }
+    // Progress updates (final:false) do not end the turn; the option can be turned off.
+    {
+      const { sdk, state } = fakeSdk([{ callTool: "message", callArgs: { action: "send", message: "进度", final: false }, events: [{ type: "tool_call", name: "mcp", call_id: "m2", status: "completed" }], result: { status: "finished", result: "done" } }]);
+      const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }) });
+      const out = await collect(exec(baseCtx({ args, openClawAllow: new Set(["message"]) })));
+      assert.equal(out.at(-1).result, "done");
+      assert.equal(state.runs[0].cancelled, false);
+    }
+    {
+      const { sdk, state } = fakeSdk([{ callTool: "message", callArgs: { action: "send", message: "答复", final: true }, events: [{ type: "tool_call", name: "mcp", call_id: "m3", status: "completed" }], result: { status: "finished", result: "NO_REPLY" } }]);
+      const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), finishOnFinalMessage: false });
+      const out = await collect(exec(baseCtx({ args, openClawAllow: new Set(["message"]) })));
+      assert.equal(out.at(-1).result, "NO_REPLY");
+      assert.equal(state.runs[0].cancelled, false);
+    }
   } finally {
     server.close();
   }
@@ -402,7 +427,7 @@ test("package.json and openclaw.plugin.json agree on version; config schema cove
   assert.equal(manifest.version, pkg.version);
   assert.equal(manifest.id, "cursor-cli");
   const props = Object.keys(manifest.configSchema.properties);
-  for (const opt of ["apiKeyFile", "transport", "useHttp1", "modelDefaults", "agentIdleMinutes", "force", "command", "acpModelAliases"]) assert.ok(props.includes(opt), opt);
+  for (const opt of ["apiKeyFile", "transport", "useHttp1", "modelDefaults", "agentIdleMinutes", "finishOnFinalMessage", "force", "command", "acpModelAliases"]) assert.ok(props.includes(opt), opt);
   assert.equal(manifest.configSchema.additionalProperties, false);
 });
 

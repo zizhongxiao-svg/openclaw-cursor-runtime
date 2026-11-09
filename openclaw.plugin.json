@@ -2,7 +2,7 @@
   "id": "cursor-cli",
   "name": "Cursor Runtime",
   "description": "Run Cursor agents as an OpenClaw model runtime",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "cliBackends": [
     "cursor-cli"
   ],
@@ -76,6 +76,10 @@
         "type": "number",
         "minimum": 0,
         "description": "sdk transport: close cached Cursor agents idle for this many minutes (default 360; 0 disables the sweep). They are reopened on the next turn."
+      },
+      "finishOnFinalMessage": {
+        "type": "boolean",
+        "description": "sdk transport: end the turn as soon as the agent delivers its answer with message(final:true), skipping the wrap-up model call that only returns NO_REPLY (default true)"
       }
     }
   },

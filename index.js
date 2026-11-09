@@ -36,6 +36,7 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
     apiKeyFile,
     useHttp1: pluginConfig.useHttp1 !== false,
     modelDefaults: pluginConfig.modelDefaults,
+    finishOnFinalMessage: pluginConfig.finishOnFinalMessage !== false,
     ...(typeof pluginConfig.agentIdleMinutes === "number" ? { agentIdleMs: pluginConfig.agentIdleMinutes * 60 * 1000 } : {}),
     log,
   });

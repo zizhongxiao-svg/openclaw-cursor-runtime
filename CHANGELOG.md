@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.3] - 2026-11-09
+
+### Added
+- `finishOnFinalMessage` (default `true`). When the agent delivers its answer
+  with `message(action: "send", final: true)`, the turn ends at once with
+  `NO_REPLY` and the remaining Cursor run (the wrap-up model call) is
+  cancelled. Measured on warm turns: 8.1–9.1 s → 5.4–5.7 s per turn. The reply
+  reaches the chat at the same moment as before, but the session's queue moves
+  on about 3 s sooner.
+
 ## [0.4.2] - 2026-11-09
 
 ### Removed
