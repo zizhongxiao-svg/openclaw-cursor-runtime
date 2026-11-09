@@ -1,9 +1,17 @@
 {
-  "name": "openclaw-cursor-cli",
+  "name": "openclaw-cursor-runtime",
   "version": "0.4.0",
   "description": "Run Cursor agents as an OpenClaw model runtime (CLI backend plugin) with OpenClaw tools, tool caps and long-lived sessions",
   "license": "MIT",
   "author": "zizhongx <zizhong.xiao@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zizhongx/openclaw-cursor-runtime.git"
+  },
+  "homepage": "https://github.com/zizhongx/openclaw-cursor-runtime#readme",
+  "bugs": {
+    "url": "https://github.com/zizhongx/openclaw-cursor-runtime/issues"
+  },
   "type": "module",
   "main": "index.js",
   "files": [

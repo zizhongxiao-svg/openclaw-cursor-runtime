@@ -7,6 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [0.4.0] - 2026-11-09
 
 ### Changed
+- Renamed the package and repository to `openclaw-cursor-runtime`, published
+  at https://github.com/zizhongx/openclaw-cursor-runtime. The OpenClaw plugin
+  and backend id stays `cursor-cli`, so existing `cursor-cli/<model>` refs keep
+  working.
 - Side questions no longer declare `sideQuestionToolMode: "disabled"`. Cursor
   cannot run with zero native tools, so capped side questions now fail closed.
 - Native tools are classified by the names `@cursor/sdk` reports in `tool_call`

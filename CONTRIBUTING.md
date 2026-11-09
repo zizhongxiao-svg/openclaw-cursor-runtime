@@ -6,8 +6,8 @@ and Cursor), so small, well-tested changes are easiest to review.
 ## Setup
 
 ```bash
-git clone https://github.com/<owner>/openclaw-cursor-cli
-cd openclaw-cursor-cli
+git clone https://github.com/zizhongx/openclaw-cursor-runtime
+cd openclaw-cursor-runtime
 npm ci --legacy-peer-deps
 npm test
 ```

@@ -1,4 +1,4 @@
-# openclaw-cursor-cli
+# openclaw-cursor-runtime
 
 Run [Cursor](https://cursor.com) agents as a model runtime in
 [OpenClaw](https://github.com/openclaw/openclaw), the same way OpenClaw runs
@@ -12,6 +12,30 @@ search).
 
 > Status: early (0.x). Developed and run against OpenClaw 2026.10.9 and
 > `@cursor/sdk` 1.0.23 on Linux. Other versions and platforms are untested.
+
+## Quick start
+
+```bash
+git clone https://github.com/zizhongx/openclaw-cursor-runtime ~/openclaw-cursor-runtime
+cd ~/openclaw-cursor-runtime && npm ci --omit=dev --legacy-peer-deps
+openclaw plugins install --link --accept-capabilities ~/openclaw-cursor-runtime
+echo "$CURSOR_API_KEY" > ~/.config/cursor/api-key && chmod 600 ~/.config/cursor/api-key
+```
+
+Then point the plugin at the key and give an agent a Cursor model (full example
+in [Configure](#configure)):
+
+```json5
+plugins: { entries: { "cursor-cli": { enabled: true, config: { apiKeyFile: "~/.config/cursor/api-key" } } } },
+agents: { entries: { "my-agent": { model: { primary: "cursor-cli/claude-opus-5-5-medium" } } } },
+```
+
+Restart the gateway, then send the agent a message. `/status` should show
+`Model: cursor-cli/claude-opus-5-5-medium`.
+
+The package is named `openclaw-cursor-runtime`. Inside OpenClaw the plugin and
+backend id is `cursor-cli`, following the bundled `claude-cli` naming, so model
+refs look like `cursor-cli/<model>`.
 
 ## Features
 
@@ -80,10 +104,10 @@ Three transports are available:
 ## Install
 
 ```bash
-git clone https://github.com/<owner>/openclaw-cursor-cli ~/openclaw-cursor-cli
-cd ~/openclaw-cursor-cli
+git clone https://github.com/zizhongx/openclaw-cursor-runtime ~/openclaw-cursor-runtime
+cd ~/openclaw-cursor-runtime
 npm ci --omit=dev --legacy-peer-deps      # the openclaw peer comes from your gateway
-openclaw plugins install --link --accept-capabilities ~/openclaw-cursor-cli
+openclaw plugins install --link --accept-capabilities ~/openclaw-cursor-runtime
 ```
 
 Install and reinstall with the gateway running. Avoid `openclaw plugins reload`

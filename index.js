@@ -125,7 +125,7 @@ export { buildCursorCliBackend };
 
 export default {
   id: "cursor-cli",
-  name: "Cursor CLI",
+  name: "Cursor Runtime",
   description: "Run Cursor agents as an OpenClaw CLI model backend",
   register(api) {
     const log = (m) => { try { (api.logger?.info ?? console.error)(m); } catch {} };

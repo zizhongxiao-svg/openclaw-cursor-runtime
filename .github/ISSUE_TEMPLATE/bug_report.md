@@ -9,7 +9,7 @@ labels: bug
 **What you expected**
 
 **Versions**
-- openclaw-cursor-cli:
+- openclaw-cursor-runtime:
 - OpenClaw (`openclaw --version`):
 - @cursor/sdk (`npm ls @cursor/sdk`):
 - Node.js / OS:
