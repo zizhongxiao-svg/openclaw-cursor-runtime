@@ -3,7 +3,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { resolveModelSelection, normalizeFinalText, estimatePerCallUsage } from "../lib/sdk-runtime.js";
+import { resolveModelSelection, normalizeFinalText, estimatePerCallUsage, isRetryableAuthError } from "../lib/sdk-runtime.js";
+
+test("isRetryableAuthError matches Cursor auth failures only", () => {
+  assert.equal(isRetryableAuthError("Authentication error If you are logged in, try logging out and back in."), true);
+  assert.equal(isRetryableAuthError("[unauthenticated] token expired"), true);
+  assert.equal(isRetryableAuthError("HTTP 401"), true);
+  assert.equal(isRetryableAuthError("Model not available This model provider is not supported in your region."), false);
+  assert.equal(isRetryableAuthError("rate limit exceeded"), false);
+  assert.equal(isRetryableAuthError(undefined), false);
+});
 import { resolveAcpModelId, applyThinking } from "../lib/acp-runtime.js";
 import { extractMcpConfigPaths, toAcpMcpServer, McpRelay } from "../lib/mcp-relay.js";
 import { buildCursorCliBackend } from "../index.js";
