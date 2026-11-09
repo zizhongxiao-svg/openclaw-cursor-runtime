@@ -2,17 +2,50 @@
   "id": "cursor-cli",
   "name": "Cursor CLI",
   "description": "Run Cursor Agent (cursor-agent) as an OpenClaw CLI model backend",
-  "version": "0.1.0",
-  "cliBackends": ["cursor-cli"],
-  "setup": { "cliBackends": ["cursor-cli"], "requiresRuntime": false },
-  "activation": { "onStartup": false },
+  "version": "0.2.0",
+  "cliBackends": [
+    "cursor-cli"
+  ],
+  "setup": {
+    "cliBackends": [
+      "cursor-cli"
+    ],
+    "requiresRuntime": false
+  },
+  "activation": {
+    "onStartup": false
+  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "command": { "type": "string", "description": "cursor-agent binary (default: cursor-agent on PATH)" },
-      "apiKeyFile": { "type": "string", "description": "File holding CURSOR_API_KEY; used when the env var is unset" },
-      "force": { "type": "boolean", "description": "Pass --force so tool calls run without prompts (default true)" }
+      "command": {
+        "type": "string",
+        "description": "cursor-agent binary (default: cursor-agent on PATH)"
+      },
+      "apiKeyFile": {
+        "type": "string",
+        "description": "File holding CURSOR_API_KEY; used when the env var is unset"
+      },
+      "force": {
+        "type": "boolean",
+        "description": "Pass --force so tool calls run without prompts (default true)"
+      },
+      "transport": {
+        "type": "string",
+        "enum": [
+          "acp",
+          "print"
+        ],
+        "description": "acp (default): persistent cursor-agent acp process; print: one cursor-agent -p process per turn"
+      },
+      "acpModelAliases": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "Extra OpenClaw model id -> Cursor ACP model id mappings"
+      }
     }
   }
 }
