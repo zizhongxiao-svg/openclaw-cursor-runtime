@@ -7,6 +7,7 @@ import { resolveModelSelection, normalizeFinalText, estimatePerCallUsage } from 
 import { resolveAcpModelId, applyThinking } from "../lib/acp-runtime.js";
 import { extractMcpConfigPaths, toAcpMcpServer, McpRelay } from "../lib/mcp-relay.js";
 import { buildCursorCliBackend } from "../index.js";
+import { planToolAvailability, projectCursorNativeToolAuthority, CURSOR_NATIVE_TOOL_NAMES } from "../lib/tool-policy.js";
 
 test("resolveModelSelection maps effort-suffixed ids to SDK params", () => {
   assert.deepEqual(resolveModelSelection("claude-opus-5-5-medium"), {
@@ -92,18 +93,56 @@ test("MCP relay rejects requests outside an active turn and forwards during one"
   }
 });
 
-test("backend shape matches the transport", () => {
+test("backend shape matches the transport", async () => {
   const sdk = buildCursorCliBackend({});
   assert.equal(sdk.id, "cursor-cli");
+  assert.equal(sdk.nativeToolMode, "selectable");
+  assert.equal(sdk.toolAvailabilityEnforcement, "prepare-execution");
+  assert.equal(sdk.projectNativeToolAuthority, projectCursorNativeToolAuthority);
   assert.equal(sdk.bundleMcp, true);
   assert.equal(sdk.bundleMcpMode, "claude-config-file");
   assert.equal(sdk.ownsNativeCompaction, true);
-  assert.equal(typeof sdk.prepareExecution, "function");
   assert.equal(sdk.config.jsonlDialect, "claude-stream-json");
   assert.equal(sdk.config.reseedFromRawTranscriptWhenUncompacted, true);
   assert.equal(sdk.config.imageArg, "--openclaw-image");
+
+  const open = await sdk.prepareExecution({ workspaceDir: "/w", provider: "cursor-cli", modelId: "m" });
+  assert.equal(typeof open.execute, "function");
+  assert.equal(open.toolAvailabilityEnforced, undefined);
+  const capped = await sdk.prepareExecution({ workspaceDir: "/w", provider: "cursor-cli", modelId: "m", toolAvailability: { native: CURSOR_NATIVE_TOOL_NAMES, openClaw: ["message"] } });
+  assert.equal(capped.toolAvailabilityEnforced, true);
+  await assert.rejects(sdk.prepareExecution({ workspaceDir: "/w", provider: "cursor-cli", modelId: "m", toolAvailability: { native: ["Read"], openClaw: [] } }), /cannot enforce/);
+  const btw = await sdk.prepareExecution({ workspaceDir: "/w", provider: "cursor-cli", modelId: "m", executionMode: "side-question", toolAvailability: { native: [], openClaw: [] } });
+  assert.equal(typeof btw.execute, "function");
+
+  const acp = buildCursorCliBackend({ transport: "acp" });
+  assert.equal(acp.nativeToolMode, "always-on");
+  assert.equal(typeof acp.prepareExecution, "function");
+  assert.equal(acp.projectNativeToolAuthority, undefined);
+
   const print = buildCursorCliBackend({ transport: "print" });
+  assert.equal(print.nativeToolMode, "always-on");
   assert.equal(print.prepareExecution, undefined);
   assert.equal(print.bundleMcp, undefined);
   assert.equal(print.config.imageArg, undefined);
+});
+
+test("native tool authority projection", () => {
+  assert.deepEqual(projectCursorNativeToolAuthority(["Read", "Grep", "Glob", "Shell", "Bogus"]).sort(), ["exec", "read"]);
+  assert.deepEqual(projectCursorNativeToolAuthority(undefined), []);
+});
+
+test("tool availability planning: OpenClaw tools exact, native all-or-nothing", () => {
+  assert.deepEqual(planToolAvailability(undefined), { enforceable: true });
+  const full = planToolAvailability({ native: ["Read", "Write", "StrReplace", "Shell", "WebSearch", "WebFetch"], openClaw: ["message", "automations"] });
+  assert.equal(full.enforceable, true);
+  assert.deepEqual([...full.openClawAllow], ["message", "automations"]);
+  const narrow = planToolAvailability({ native: ["Read", "Write", "StrReplace", "WebSearch", "WebFetch"], openClaw: [] });
+  assert.equal(narrow.enforceable, false);
+  assert.match(narrow.reason, /exec/);
+  assert.equal(planToolAvailability({ native: [], openClaw: ["message"] }).enforceable, false);
+});
+
+test("context window option from the catalog reaches the SDK model params", () => {
+  assert.deepEqual(resolveModelSelection("claude-opus-5-5-high", undefined, { context: "1m" }).params[0], { id: "context", value: "1m" });
 });

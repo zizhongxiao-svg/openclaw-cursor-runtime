@@ -27,7 +27,9 @@ files, …) next to Cursor's native tools (shell, read/write, web search).
   per-call context sample is reported), `NO_REPLY` normalisation, side
   questions (`/btw`) in a separate read-only agent.
 - **Model catalog** for `cursor-cli/claude-opus-5-5-*` with a 300K default
-  context window (1M selectable), so `/status` knows the window.
+  context window (1M selectable), so `/status` knows the window; the selected
+  window is passed to Cursor as the `context` parameter.
+- **Tool caps** for automations and restricted runs (see limitations).
 
 ## Requirements
 
@@ -106,9 +108,15 @@ differs from the effort you want by default; `/think` overrides it per session.
 - Cursor's native tools are always on; OpenClaw exec approvals do not gate them
   (same as `claude-cli` in bypass mode). `force: false` routes ACP permission
   prompts to OpenClaw.
-- The plugin does not report Cursor's native tool list to OpenClaw, so
-  automations created from a Cursor session do not inherit native shell/file
-  capabilities.
+- Tool caps (automations, cron jobs, restricted senders, workspace-only
+  policies): OpenClaw tools are filtered exactly, but Cursor cannot switch
+  individual native tools off. A capped run is accepted only when every native
+  capability (read, write, edit, exec, web_search, web_fetch) is allowed; a
+  narrower native cap fails closed with "cursor-cli cannot enforce this run's
+  tool cap". The native tool list is reported to OpenClaw, so automations
+  created from a Cursor session record the full native capability set.
+- Side questions (`/btw`) run in Cursor's read-only plan mode, which still
+  allows read-only native tools.
 - Explicit `/compact` is not supported; Cursor compacts its own context.
 
 ## Development

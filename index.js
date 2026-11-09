@@ -2,6 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAcpExecute, IMAGE_ARG } from "./lib/acp-runtime.js";
 import { createSdkExecute } from "./lib/sdk-runtime.js";
+import { planToolAvailability, projectCursorNativeToolAuthority } from "./lib/tool-policy.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const WRAPPER = path.join(here, "bin", "cursor-openclaw.mjs");
@@ -41,14 +42,38 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
   return {
     id: "cursor-cli",
     modelProvider: "cursor-cli",
-    nativeToolMode: "always-on",
-    ...(transport !== "print"
+    ...(transport === "sdk"
       ? {
-          // sdk (default): long-lived Cursor SDK agents with OpenClaw tools as customTools.
+          // OpenClaw tools are filtered exactly; native tools are all-or-nothing (see lib/tool-policy.js).
+          nativeToolMode: "selectable",
+          toolAvailabilityEnforcement: "prepare-execution",
+          projectNativeToolAuthority: projectCursorNativeToolAuthority,
+          prepareExecution: async (pctx) => {
+            const sideQuestion = pctx?.executionMode === "side-question";
+            const plan = sideQuestion ? { enforceable: true } : planToolAvailability(pctx?.toolAvailability);
+            if (!plan.enforceable) throw new Error(`cursor-cli cannot enforce this run's tool cap: ${plan.reason}`);
+            return {
+              execute: (ctx) => sdkExecute({
+                ...ctx,
+                thinkingLevel: pctx?.thinkingLevel,
+                contextWindowOption: pctx?.contextWindow,
+                openClawAllow: plan.openClawAllow,
+              }),
+              ...(pctx?.toolAvailability ? { toolAvailabilityEnforced: true } : {}),
+            };
+          },
+        }
+      : { nativeToolMode: "always-on" }),
+    ...(transport === "acp"
+      ? {
           // acp: persistent `cursor-agent acp` process (no OpenClaw tools under MCP-blocking team policies).
           prepareExecution: async (pctx) => ({
-            execute: (ctx) => (transport === "sdk" ? sdkExecute : acpExecute)({ ...ctx, thinkingLevel: pctx?.thinkingLevel }),
+            execute: (ctx) => acpExecute({ ...ctx, thinkingLevel: pctx?.thinkingLevel }),
           }),
+        }
+      : {}),
+    ...(transport !== "print"
+      ? {
           ownsNativeCompaction: true,
           // Same OpenClaw tool surface as claude-cli: the loopback MCP server, handed
           // over as a Claude-style --mcp-config file and relayed into the ACP session.
