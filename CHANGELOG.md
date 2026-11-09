@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.4] - 2026-11-09
+
+### Fixed
+- Sessions no longer wait for each other. With `serialize: true`, OpenClaw puts
+  every run of a non-`claude-cli` backend behind one queue key, so a WeChat turn
+  waited for a Telegram turn to finish. Each session has its own Cursor agent,
+  and OpenClaw already orders turns within a session, so the backend now sets
+  `serialize: false`.
+
+### Added
+- A per-turn timing log line: `cursor-cli: timing agent=… sdk= tools=(n) agent=
+  first= lastTool= total= calls=`. It shows where a slow turn spent its time:
+  the OpenClaw tool list, opening the agent, or waiting for Cursor's first
+  event.
+
 ## [0.4.3] - 2026-11-09
 
 ### Added

@@ -108,7 +108,10 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
       // cursor-agent has no system-prompt flag; print mode prepends this file, the other transports prepend ctx.systemPrompt.
       systemPromptFileArg: "--system-file",
       systemPromptWhen: "first",
-      serialize: true,
+      // false: for non-claude backends OpenClaw's serialize=true queues every run of the
+      // backend behind one key, so a WeChat turn waited for a Telegram turn. Each session
+      // has its own Cursor agent and OpenClaw already orders turns per session.
+      serialize: false,
       // Like claude-cli: after a session reset (e.g. MCP/tool fingerprint change), reseed the
       // new Cursor agent from the bounded raw OpenClaw transcript so prior context survives.
       reseedFromRawTranscriptWhenUncompacted: true,

@@ -446,6 +446,8 @@ test("backend shape matches the transport", async () => {
   assert.equal(sdk.ownsNativeCompaction, true);
   assert.equal(sdk.config.jsonlDialect, "claude-stream-json");
   assert.equal(sdk.config.reseedFromRawTranscriptWhenUncompacted, true);
+  // serialize=true would queue every cursor-cli run (all sessions) behind one key.
+  assert.equal(sdk.config.serialize, false);
   assert.equal(sdk.config.imageArg, "--openclaw-image");
 
   const open = await sdk.prepareExecution({ workspaceDir: "/w", provider: "cursor-cli", modelId: "m" });
