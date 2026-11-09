@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.5] - 2026-11-09
+
+### Changed
+- OpenClaw tool definitions are cached per workspace and allowed-tool set. In
+  production, listing about 50 tools from the loopback server took 6–12 s per
+  turn (`cursor-cli: timing … tools=12348(48)`). Later turns now start Cursor
+  with the cached list and refresh it in the background using the current
+  turn's grant. Calls always use the current turn's grant, so OpenClaw still
+  enforces permissions. `toolListCache: false` (code option) disables the cache.
+
 ## [0.4.4] - 2026-11-09
 
 ### Fixed

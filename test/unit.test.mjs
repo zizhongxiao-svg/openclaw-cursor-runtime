@@ -15,7 +15,31 @@ import {
   normalizeFinalText,
   resolveModelSelection,
   toClaudeUsage,
+  ToolListCache,
 } from "../lib/sdk-runtime.js";
+
+test("ToolListCache: first turn waits for the list, later turns use the cache and refresh in the background", async () => {
+  const cache = new ToolListCache();
+  const key = ToolListCache.key("/w", new Set(["b", "a"]));
+  assert.equal(key, ToolListCache.key("/w", new Set(["a", "b"]))); // order-insensitive
+  assert.notEqual(key, ToolListCache.key("/w", undefined));
+  let calls = 0;
+  let release;
+  const slow = () => { calls += 1; return calls === 1 ? Promise.resolve([{ name: "v1" }]) : new Promise((r) => { release = () => r([{ name: "v2" }]); }); };
+  const first = await cache.get(key, slow);
+  assert.deepEqual(first, { tools: [{ name: "v1" }], cached: false });
+  const second = await cache.get(key, slow); // returns at once while the refresh is pending
+  assert.deepEqual(second, { tools: [{ name: "v1" }], cached: true });
+  assert.equal(calls, 2);
+  const third = await cache.get(key, slow); // no second concurrent refresh
+  assert.equal(calls, 2);
+  assert.equal(third.cached, true);
+  release();
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual((await cache.get(key, () => Promise.reject(new Error("grant gone")), () => {})).tools, [{ name: "v2" }]);
+  await new Promise((r) => setTimeout(r, 0));
+  assert.deepEqual((await cache.get(key, () => Promise.resolve([]))).tools, [{ name: "v2" }]); // failed refresh kept v2
+});
 import { applyThinking, pickPermissionOption, resolveAcpModelId } from "../lib/acp-runtime.js";
 import { McpRelay, extractMcpConfigPaths, toAcpMcpServer } from "../lib/mcp-relay.js";
 import { childEnv, readApiKey } from "../lib/common.js";
