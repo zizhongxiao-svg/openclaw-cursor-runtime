@@ -153,13 +153,18 @@ Use `cursor-cli/claude-opus-5-5`. The effort comes from OpenClaw's thinking
 level, so `/think high` in a chat switches the next turns to Cursor
 `effort=high`, with no change of model.
 
+`/think` offers exactly the efforts Cursor supports for Opus 5.5. The catalog
+hides `off` and `minimal`, which Cursor does not have.
+
 | `/think` | Cursor effort |
 | --- | --- |
-| `off`, `minimal`, `low` | `low` |
-| `medium`, `adaptive`, default | `medium` (or `modelDefaults.effort`) |
+| default | `medium` (or `modelDefaults.effort`) |
+| `low` | `low` |
+| `medium` | `medium` |
 | `high` | `high` |
-| `xhigh` | `xhigh` |
-| `max`, `ultra` | `max` |
+| `xhigh` | `xhigh` (Extra High) |
+| `max` | `max` |
+| `ultra` (OpenClaw's delegation mode, always listed) | `max` |
 
 To confirm, check two places:
 

@@ -2,7 +2,7 @@
   "id": "cursor-cli",
   "name": "Cursor Runtime",
   "description": "Run Cursor agents as an OpenClaw model runtime",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "cliBackends": [
     "cursor-cli"
   ],
@@ -107,7 +107,8 @@
             "contextWindowDefault": "300k",
             "maxTokens": 128000,
             "thinkingLevelMap": {
-              "minimal": "low",
+              "off": null,
+              "minimal": null,
               "xhigh": "xhigh",
               "max": "max"
             },
@@ -146,7 +147,8 @@
             "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
             "replacedBy": "claude-opus-5-5",
             "thinkingLevelMap": {
-              "minimal": "low",
+              "off": null,
+              "minimal": null,
               "xhigh": "xhigh",
               "max": "max"
             }
@@ -178,7 +180,8 @@
             "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
             "replacedBy": "claude-opus-5-5",
             "thinkingLevelMap": {
-              "minimal": "low",
+              "off": null,
+              "minimal": null,
               "xhigh": "xhigh",
               "max": "max"
             }
@@ -210,7 +213,8 @@
             "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
             "replacedBy": "claude-opus-5-5",
             "thinkingLevelMap": {
-              "minimal": "low",
+              "off": null,
+              "minimal": null,
               "xhigh": "xhigh",
               "max": "max"
             }
@@ -242,7 +246,8 @@
             "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
             "replacedBy": "claude-opus-5-5",
             "thinkingLevelMap": {
-              "minimal": "low",
+              "off": null,
+              "minimal": null,
               "xhigh": "xhigh",
               "max": "max"
             }
@@ -274,7 +279,8 @@
             "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
             "replacedBy": "claude-opus-5-5",
             "thinkingLevelMap": {
-              "minimal": "low",
+              "off": null,
+              "minimal": null,
               "xhigh": "xhigh",
               "max": "max"
             }

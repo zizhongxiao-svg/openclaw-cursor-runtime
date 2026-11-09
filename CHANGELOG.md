@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.1] - 2026-11-09
+
+### Changed
+- `/think` now lists exactly the efforts Cursor supports for Opus 5.5 (`low`,
+  `medium`, `high`, `xhigh`, `max`). The catalog hides `off` and `minimal`,
+  which Cursor does not have.
+
 ## [0.4.0] - 2026-11-09
 
 ### Changed

@@ -115,7 +115,7 @@ test("model catalog: effort-less Opus row with all thinking levels; suffixed row
   const base = rows.find((r) => r.id === "claude-opus-5-5");
   assert.ok(base && !base.status);
   assert.equal(base.contextWindow, 300000);
-  assert.deepEqual(Object.keys(base.thinkingLevelMap).sort(), ["max", "minimal", "xhigh"]);
+  assert.deepEqual(base.thinkingLevelMap, { off: null, minimal: null, xhigh: "xhigh", max: "max" }); // /think offers exactly low..max
   for (const e of ["low", "medium", "high", "xhigh", "max"]) {
     const r = rows.find((x) => x.id === `claude-opus-5-5-${e}`);
     assert.equal(r.status, "deprecated");
