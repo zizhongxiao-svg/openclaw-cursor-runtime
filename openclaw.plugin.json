@@ -61,5 +61,141 @@
         "additionalProperties": false
       }
     }
+  },
+  "modelCatalog": {
+    "providers": {
+      "cursor-cli": {
+        "models": [
+          {
+            "id": "claude-opus-5-5-low",
+            "name": "Claude Opus 5.5 Low (Cursor)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 300000,
+            "contextWindows": [
+              {
+                "id": "300k",
+                "label": "300K",
+                "contextWindow": 300000
+              },
+              {
+                "id": "1m",
+                "label": "1M",
+                "contextWindow": 1000000
+              }
+            ],
+            "contextWindowDefault": "300k",
+            "maxTokens": 128000
+          },
+          {
+            "id": "claude-opus-5-5-medium",
+            "name": "Claude Opus 5.5 Medium (Cursor)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 300000,
+            "contextWindows": [
+              {
+                "id": "300k",
+                "label": "300K",
+                "contextWindow": 300000
+              },
+              {
+                "id": "1m",
+                "label": "1M",
+                "contextWindow": 1000000
+              }
+            ],
+            "contextWindowDefault": "300k",
+            "maxTokens": 128000
+          },
+          {
+            "id": "claude-opus-5-5-high",
+            "name": "Claude Opus 5.5 High (Cursor)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 300000,
+            "contextWindows": [
+              {
+                "id": "300k",
+                "label": "300K",
+                "contextWindow": 300000
+              },
+              {
+                "id": "1m",
+                "label": "1M",
+                "contextWindow": 1000000
+              }
+            ],
+            "contextWindowDefault": "300k",
+            "maxTokens": 128000
+          },
+          {
+            "id": "claude-opus-5-5-xhigh",
+            "name": "Claude Opus 5.5 Xhigh (Cursor)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 300000,
+            "contextWindows": [
+              {
+                "id": "300k",
+                "label": "300K",
+                "contextWindow": 300000
+              },
+              {
+                "id": "1m",
+                "label": "1M",
+                "contextWindow": 1000000
+              }
+            ],
+            "contextWindowDefault": "300k",
+            "maxTokens": 128000
+          },
+          {
+            "id": "claude-opus-5-5-max",
+            "name": "Claude Opus 5.5 Max (Cursor)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 300000,
+            "contextWindows": [
+              {
+                "id": "300k",
+                "label": "300K",
+                "contextWindow": 300000
+              },
+              {
+                "id": "1m",
+                "label": "1M",
+                "contextWindow": 1000000
+              }
+            ],
+            "contextWindowDefault": "300k",
+            "maxTokens": 128000
+          }
+        ]
+      }
+    },
+    "discovery": {
+      "cursor-cli": "static"
+    }
+  },
+  "modelSupport": {
+    "modelPrefixes": [
+      "claude-opus-5-5-"
+    ]
   }
 }
