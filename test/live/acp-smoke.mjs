@@ -1,4 +1,4 @@
-import { createAcpExecute, resolveAcpModelId, _closeAllForTest } from "../../lib/acp-runtime.js";
+import { createAcpExecute, resolveAcpModelId, closeAllForTest } from "../../lib/acp-runtime.js";
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", e?.message, e?.stack?.split("\n").slice(0,6).join(" | ")));
 const exec = createAcpExecute({ apiKeyFile: process.argv[2], modelAliases: { "claude-opus-5-5-medium": "claude-opus-5-5[context=300k,effort=medium,fast=false]" }, log: (m) => console.log("LOG", m) });
 const ctl = new AbortController();
@@ -16,7 +16,7 @@ const sid = await turn("Remember the code word: banana-42. Reply in one short se
 await turn("What is the code word? Reply with just it.", sid);
 await turn("用 shell 执行 `echo hi-from-shell` 并告诉我输出", sid);
 // simulate restart: kill the pooled process
-_closeAllForTest(true); await new Promise((r) => setTimeout(r, 1500));
+closeAllForTest(true); await new Promise((r) => setTimeout(r, 1500));
 await turn("Code word again? just it.", sid);
 console.log("model map:", resolveAcpModelId("claude-sonnet-5-5-high", [{ modelId: "claude-sonnet-5-5[context=300k,reasoning_effort=high]" }]));
 process.exit(0);

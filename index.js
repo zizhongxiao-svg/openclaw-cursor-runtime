@@ -1,7 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAcpExecute, IMAGE_ARG } from "./lib/acp-runtime.js";
+import { createAcpExecute } from "./lib/acp-runtime.js";
 import { createSdkExecute } from "./lib/sdk-runtime.js";
+import { IMAGE_ARG } from "./lib/common.js";
 import { planToolAvailability, projectCursorNativeToolAuthority } from "./lib/tool-policy.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -22,14 +23,19 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
   const apiKeyFile = str(pluginConfig.apiKeyFile);
   const force = pluginConfig.force !== false;
   const transport = ["print", "acp"].includes(pluginConfig.transport) ? pluginConfig.transport : "sdk";
+  if (!force && transport === "sdk") {
+    log?.("cursor-cli: force=false has no effect with transport \"sdk\" (the Cursor SDK does not surface permission prompts); use transport \"acp\" to route prompts to OpenClaw");
+  }
   const env = {};
   if (command) env.OPENCLAW_CURSOR_COMMAND = command;
   if (apiKeyFile) env.OPENCLAW_CURSOR_API_KEY_FILE = apiKeyFile;
   const base = [WRAPPER, "-p", "--trust", ...(force ? ["--force"] : []), "--output-format", "stream-json"];
+
   const sdkExecute = createSdkExecute({
     apiKeyFile,
     useHttp1: pluginConfig.useHttp1 !== false,
     modelDefaults: pluginConfig.modelDefaults,
+    ...(typeof pluginConfig.agentIdleMinutes === "number" ? { agentIdleMs: pluginConfig.agentIdleMinutes * 60 * 1000 } : {}),
     log,
   });
   const acpExecute = createAcpExecute({
@@ -39,48 +45,49 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
     modelAliases: { ...ACP_MODEL_ALIASES, ...(pluginConfig.acpModelAliases ?? {}) },
     log,
   });
+
+  const transportHooks = {
+    // sdk (default): long-lived Cursor SDK agents; OpenClaw tools as customTools.
+    // OpenClaw tools are filtered exactly; native tools are all-or-nothing (lib/tool-policy.js).
+    sdk: {
+      nativeToolMode: "selectable",
+      toolAvailabilityEnforcement: "prepare-execution",
+      projectNativeToolAuthority: projectCursorNativeToolAuthority,
+      prepareExecution: async (pctx) => {
+        const plan = planToolAvailability(pctx?.toolAvailability);
+        if (!plan.enforceable) throw new Error(`cursor-cli cannot enforce this run's tool cap: ${plan.reason}`);
+        return {
+          execute: (ctx) => sdkExecute({
+            ...ctx,
+            thinkingLevel: pctx?.thinkingLevel,
+            contextWindowOption: pctx?.contextWindow,
+            openClawAllow: plan.openClawAllow,
+          }),
+          ...(pctx?.toolAvailability ? { toolAvailabilityEnforced: true } : {}),
+        };
+      },
+    },
+    // acp: one persistent `cursor-agent acp` process. Native tools cannot be capped.
+    acp: {
+      nativeToolMode: "always-on",
+      prepareExecution: async (pctx) => ({
+        execute: (ctx) => acpExecute({ ...ctx, thinkingLevel: pctx?.thinkingLevel }),
+      }),
+    },
+    // print: one `cursor-agent -p` per turn, driven by OpenClaw's generic CLI runner.
+    print: { nativeToolMode: "always-on" },
+  }[transport];
+
   return {
     id: "cursor-cli",
     modelProvider: "cursor-cli",
-    ...(transport === "sdk"
-      ? {
-          // OpenClaw tools are filtered exactly; native tools are all-or-nothing (see lib/tool-policy.js).
-          nativeToolMode: "selectable",
-          toolAvailabilityEnforcement: "prepare-execution",
-          projectNativeToolAuthority: projectCursorNativeToolAuthority,
-          prepareExecution: async (pctx) => {
-            const sideQuestion = pctx?.executionMode === "side-question";
-            const plan = sideQuestion ? { enforceable: true } : planToolAvailability(pctx?.toolAvailability);
-            if (!plan.enforceable) throw new Error(`cursor-cli cannot enforce this run's tool cap: ${plan.reason}`);
-            return {
-              execute: (ctx) => sdkExecute({
-                ...ctx,
-                thinkingLevel: pctx?.thinkingLevel,
-                contextWindowOption: pctx?.contextWindow,
-                openClawAllow: plan.openClawAllow,
-              }),
-              ...(pctx?.toolAvailability ? { toolAvailabilityEnforced: true } : {}),
-            };
-          },
-        }
-      : { nativeToolMode: "always-on" }),
-    ...(transport === "acp"
-      ? {
-          // acp: persistent `cursor-agent acp` process (no OpenClaw tools under MCP-blocking team policies).
-          prepareExecution: async (pctx) => ({
-            execute: (ctx) => acpExecute({ ...ctx, thinkingLevel: pctx?.thinkingLevel }),
-          }),
-        }
-      : {}),
+    ...transportHooks,
     ...(transport !== "print"
       ? {
           ownsNativeCompaction: true,
-          // Same OpenClaw tool surface as claude-cli: the loopback MCP server, handed
-          // over as a Claude-style --mcp-config file and relayed into the ACP session.
+          // The turn's OpenClaw loopback MCP grant, handed over as a Claude-style --mcp-config file.
           bundleMcp: true,
           bundleMcpMode: "claude-config-file",
-          // Side questions run in a fresh read-only ("ask" mode) ACP session.
-          sideQuestionToolMode: "disabled",
         }
       : {}),
     config: {
@@ -96,7 +103,7 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
       modelAliases: MODEL_ALIASES,
       sessionMode: "existing",
       sessionIdFields: ["session_id"],
-      // cursor-agent has no system-prompt flag; print mode prepends this file, ACP mode prepends ctx.systemPrompt.
+      // cursor-agent has no system-prompt flag; print mode prepends this file, the other transports prepend ctx.systemPrompt.
       systemPromptFileArg: "--system-file",
       systemPromptWhen: "first",
       serialize: true,
@@ -119,7 +126,7 @@ export { buildCursorCliBackend };
 export default {
   id: "cursor-cli",
   name: "Cursor CLI",
-  description: "Run Cursor Agent (cursor-agent) as an OpenClaw CLI model backend",
+  description: "Run Cursor agents as an OpenClaw CLI model backend",
   register(api) {
     const log = (m) => { try { (api.logger?.info ?? console.error)(m); } catch {} };
     api.registerCliBackend(buildCursorCliBackend(api.pluginConfig ?? {}, log));
