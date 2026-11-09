@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAcpExecute } from "./lib/acp-runtime.js";
+import { createAcpExecute, IMAGE_ARG } from "./lib/acp-runtime.js";
+import { createSdkExecute } from "./lib/sdk-runtime.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const WRAPPER = path.join(here, "bin", "cursor-openclaw.mjs");
@@ -19,11 +20,17 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
   const command = str(pluginConfig.command);
   const apiKeyFile = str(pluginConfig.apiKeyFile);
   const force = pluginConfig.force !== false;
-  const transport = pluginConfig.transport === "print" ? "print" : "acp";
+  const transport = ["print", "acp"].includes(pluginConfig.transport) ? pluginConfig.transport : "sdk";
   const env = {};
   if (command) env.OPENCLAW_CURSOR_COMMAND = command;
   if (apiKeyFile) env.OPENCLAW_CURSOR_API_KEY_FILE = apiKeyFile;
   const base = [WRAPPER, "-p", "--trust", ...(force ? ["--force"] : []), "--output-format", "stream-json"];
+  const sdkExecute = createSdkExecute({
+    apiKeyFile,
+    useHttp1: pluginConfig.useHttp1 !== false,
+    modelDefaults: pluginConfig.modelDefaults,
+    log,
+  });
   const acpExecute = createAcpExecute({
     command,
     apiKeyFile,
@@ -35,11 +42,20 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
     id: "cursor-cli",
     modelProvider: "cursor-cli",
     nativeToolMode: "always-on",
-    ...(transport === "acp"
+    ...(transport !== "print"
       ? {
-          // Persistent `cursor-agent acp` process; no per-turn CLI startup.
-          prepareExecution: async () => ({ execute: acpExecute }),
+          // sdk (default): long-lived Cursor SDK agents with OpenClaw tools as customTools.
+          // acp: persistent `cursor-agent acp` process (no OpenClaw tools under MCP-blocking team policies).
+          prepareExecution: async (pctx) => ({
+            execute: (ctx) => (transport === "sdk" ? sdkExecute : acpExecute)({ ...ctx, thinkingLevel: pctx?.thinkingLevel }),
+          }),
           ownsNativeCompaction: true,
+          // Same OpenClaw tool surface as claude-cli: the loopback MCP server, handed
+          // over as a Claude-style --mcp-config file and relayed into the ACP session.
+          bundleMcp: true,
+          bundleMcpMode: "claude-config-file",
+          // Side questions run in a fresh read-only ("ask" mode) ACP session.
+          sideQuestionToolMode: "disabled",
         }
       : {}),
     config: {
@@ -59,6 +75,7 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
       systemPromptFileArg: "--system-file",
       systemPromptWhen: "first",
       serialize: true,
+      ...(transport !== "print" ? { imageArg: IMAGE_ARG, imageMode: "repeat", imagePathScope: "temp" } : {}),
       reliability: {
         watchdog: {
           fresh: { noOutputTimeoutRatio: 0.8, minMs: 300000, maxMs: 900000 },

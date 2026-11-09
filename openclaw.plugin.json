@@ -2,7 +2,7 @@
   "id": "cursor-cli",
   "name": "Cursor CLI",
   "description": "Run Cursor Agent (cursor-agent) as an OpenClaw CLI model backend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "cliBackends": [
     "cursor-cli"
   ],
@@ -34,10 +34,11 @@
       "transport": {
         "type": "string",
         "enum": [
+          "sdk",
           "acp",
           "print"
         ],
-        "description": "acp (default): persistent cursor-agent acp process; print: one cursor-agent -p process per turn"
+        "description": "sdk (default): Cursor SDK agents with OpenClaw tools; acp: persistent cursor-agent acp process; print: one cursor-agent -p per turn"
       },
       "acpModelAliases": {
         "type": "object",
@@ -45,6 +46,19 @@
           "type": "string"
         },
         "description": "Extra OpenClaw model id -> Cursor ACP model id mappings"
+      },
+      "useHttp1": {
+        "type": "boolean",
+        "description": "Use HTTP/1.1 for Cursor SDK agent traffic (default true; needed behind HTTP proxies)"
+      },
+      "modelDefaults": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       }
     }
   }

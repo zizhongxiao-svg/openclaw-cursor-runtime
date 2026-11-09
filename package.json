@@ -1,6 +1,6 @@
 {
   "name": "openclaw-cursor-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "OpenClaw CLI backend that runs Cursor Agent (cursor-agent) as a model runtime",
   "license": "MIT",
   "type": "module",
@@ -25,5 +25,8 @@
   },
   "engines": {
     "node": ">=22.13.0"
+  },
+  "dependencies": {
+    "@cursor/sdk": "1.0.23"
   }
 }
