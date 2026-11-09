@@ -75,6 +75,9 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
       systemPromptFileArg: "--system-file",
       systemPromptWhen: "first",
       serialize: true,
+      // Like claude-cli: after a session reset (e.g. MCP/tool fingerprint change), reseed the
+      // new Cursor agent from the bounded raw OpenClaw transcript so prior context survives.
+      reseedFromRawTranscriptWhenUncompacted: true,
       ...(transport !== "print" ? { imageArg: IMAGE_ARG, imageMode: "repeat", imagePathScope: "temp" } : {}),
       reliability: {
         watchdog: {
