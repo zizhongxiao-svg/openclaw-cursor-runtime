@@ -1,0 +1,14 @@
+{
+  "name": "openclaw-cursor-cli",
+  "version": "0.1.0",
+  "description": "OpenClaw CLI backend that runs Cursor Agent (cursor-agent) as a model runtime",
+  "license": "MIT",
+  "type": "module",
+  "files": ["index.js", "bin/", "openclaw.plugin.json", "README.md"],
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": { "pluginApi": ">=2026.10.0", "minGatewayVersion": "2026.10.0" }
+  },
+  "peerDependencies": { "openclaw": ">=2026.10.0" },
+  "engines": { "node": ">=22.13.0" }
+}
