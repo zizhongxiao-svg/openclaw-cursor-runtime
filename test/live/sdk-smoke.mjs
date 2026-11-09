@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
-import { createSdkExecute } from "../lib/sdk-runtime.js";
+import { createSdkExecute } from "../../lib/sdk-runtime.js";
 
 let valid = { token: "", key: "" }; let calls = 0; let rejected = 0;
 const up = http.createServer((req, res) => {
@@ -51,7 +51,7 @@ await turn(2, "Use the message tool again to send 'hello-2'. Reply with the tool
 await turn(3, "What colour is this image? One word.", sid, { args: ["--openclaw-image", img] });
 await turn(4, "Reply: ok", sid, { thinking: "high" });
 // simulate gateway restart: fresh module state is not possible here, so drop the cached agent by re-importing a fresh copy
-const fresh = await import(`../lib/sdk-runtime.js?restart=${Date.now()}`);
+const fresh = await import(`../../lib/sdk-runtime.js?restart=${Date.now()}`);
 exec = fresh.createSdkExecute({ apiKeyFile: process.argv[2] });
 await turn(5, "What was the code word? Just it.", sid);
 await turn(6, "In one sentence: what is 2+2?", undefined, { mode: "side-question" });

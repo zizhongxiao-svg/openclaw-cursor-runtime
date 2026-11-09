@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import zlib from "node:zlib";
-import { createAcpExecute } from "../lib/acp-runtime.js";
+import { createAcpExecute } from "../../lib/acp-runtime.js";
 
 let valid = { token: "", key: "" }; let calls = 0; let rejected = 0;
 const up = http.createServer((req, res) => {

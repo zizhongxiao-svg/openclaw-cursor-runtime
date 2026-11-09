@@ -1,4 +1,4 @@
-import { createAcpExecute, resolveAcpModelId, _closeAllForTest } from "../lib/acp-runtime.js";
+import { createAcpExecute, resolveAcpModelId, _closeAllForTest } from "../../lib/acp-runtime.js";
 process.on("unhandledRejection", (e) => console.log("UNHANDLED", e?.message, e?.stack?.split("\n").slice(0,6).join(" | ")));
 const exec = createAcpExecute({ apiKeyFile: process.argv[2], modelAliases: { "claude-opus-5-5-medium": "claude-opus-5-5[context=300k,effort=medium,fast=false]" }, log: (m) => console.log("LOG", m) });
 const ctl = new AbortController();

@@ -9,7 +9,8 @@
     "lib/",
     "bin/",
     "openclaw.plugin.json",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "openclaw": {
     "extensions": [
@@ -28,5 +29,15 @@
   },
   "dependencies": {
     "@cursor/sdk": "1.0.23"
-  }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "cursor",
+    "cursor-agent",
+    "cli-backend"
+  ]
 }

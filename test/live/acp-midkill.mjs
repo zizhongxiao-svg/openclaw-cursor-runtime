@@ -1,4 +1,4 @@
-import { createAcpExecute, _closeAllForTest } from "../lib/acp-runtime.js";
+import { createAcpExecute, _closeAllForTest } from "../../lib/acp-runtime.js";
 process.on("unhandledRejection", (e) => { console.log("UNHANDLED", e?.message); });
 process.on("uncaughtException", (e) => { console.log("UNCAUGHT", e?.message); });
 const exec = createAcpExecute({ apiKeyFile: process.argv[2] });
