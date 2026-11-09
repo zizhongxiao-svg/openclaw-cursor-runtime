@@ -370,6 +370,18 @@ test("MCP relay: rejects outside a turn, forwards with the turn grant, forgets d
   }
 });
 
+// ---------------------------------------------------------------- packaging
+
+test("package.json and openclaw.plugin.json agree on version; config schema covers README options", () => {
+  const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const manifest = JSON.parse(fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
+  assert.equal(manifest.version, pkg.version);
+  assert.equal(manifest.id, "cursor-cli");
+  const props = Object.keys(manifest.configSchema.properties);
+  for (const opt of ["apiKeyFile", "transport", "useHttp1", "modelDefaults", "agentIdleMinutes", "force", "command", "acpModelAliases"]) assert.ok(props.includes(opt), opt);
+  assert.equal(manifest.configSchema.additionalProperties, false);
+});
+
 // ---------------------------------------------------------------- backend shape
 
 test("backend shape matches the transport", async () => {

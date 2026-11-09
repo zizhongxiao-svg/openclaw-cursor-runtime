@@ -1,56 +1,94 @@
 # openclaw-cursor-cli
 
-Run [Cursor](https://cursor.com) agents as a model runtime in [OpenClaw](https://github.com/openclaw/openclaw),
-the same way OpenClaw runs Claude Code through its bundled `claude-cli` backend.
+Run [Cursor](https://cursor.com) agents as a model runtime in
+[OpenClaw](https://github.com/openclaw/openclaw), the same way OpenClaw runs
+Claude Code through its bundled `claude-cli` backend.
 
 The plugin registers a CLI backend with id `cursor-cli`. Point an agent at a
-`cursor-cli/<model>` ref and its turns run on a long-lived local Cursor agent
-that has OpenClaw's own tools (messaging, automations, sub-agents, browser,
-files, …) next to Cursor's native tools (shell, read/write, web search).
+`cursor-cli/<model>` ref and its turns run on a long-lived local Cursor agent.
+That agent has OpenClaw's own tools (messaging, automations, sub-agents,
+browser, files and so on) next to Cursor's native tools (shell, read/edit,
+search).
+
+> Status: early (0.x). Developed and run against OpenClaw 2026.10.9 and
+> `@cursor/sdk` 1.0.23 on Linux. Other versions and platforms are untested.
 
 ## Features
 
 - **Same backend type as `claude-cli`.** OpenClaw prepares the turn (system
   prompt, workspace bootstrap, tool grant, session binding, fallbacks) and the
-  plugin runs it. Fallback models keep working when Cursor fails a turn.
-- **OpenClaw tools with the same authority as `claude-cli`.** Each turn's tools
-  come from OpenClaw's per-turn loopback MCP grant (`bundleMcp`,
-  `claude-config-file`) and are registered as Cursor SDK `customTools`. Calls are
-  forwarded with that turn's credentials. This also works when a Cursor team
-  policy blocks MCP servers.
-- **Long-lived sessions.** One Cursor agent per OpenClaw session, kept in memory
-  while the gateway runs and reopened with `Agent.resume` after a restart. A
-  session reset reseeds the new agent from the OpenClaw transcript.
-- **`/think` → Cursor effort** (`low`, `medium`, `high`, `xhigh`, `max`).
-- **Images** sent by the user are passed to the model.
-- **Streaming text**, token usage (cached tokens are not double counted, and a
-  per-call context sample is reported), `NO_REPLY` normalisation, side
-  questions (`/btw`) in a separate read-only agent.
-- **Model catalog** for `cursor-cli/claude-opus-5-5-*` with a 300K default
-  context window (1M selectable), so `/status` knows the window; the selected
-  window is passed to Cursor as the `context` parameter.
-- **Tool caps** for automations and restricted runs (see limitations).
+  plugin runs it. When a Cursor turn fails, OpenClaw's model fallback takes over.
+- **OpenClaw tools, with `claude-cli`'s authority.** Each turn's tools come from
+  OpenClaw's per-turn loopback MCP grant and are registered as Cursor SDK
+  `customTools`. Calls are forwarded with that turn's credentials. This also
+  works when a Cursor team policy blocks MCP servers.
+- **Long-lived sessions.** One Cursor agent per OpenClaw session. A session reset
+  reseeds the new agent from the OpenClaw transcript.
+- **Tool caps.** Automations, cron jobs and restricted runs are enforced or
+  refused (fail closed). See [Security model](#security-model).
+- **`/think` maps to Cursor effort** (`low` … `max`). A model catalog gives
+  `cursor-cli/claude-opus-5-5-*` a 300K default window (1M selectable).
+- **Image input**, streaming text, and token usage. Cached tokens are not
+  counted twice, and a per-call context sample feeds `/status`.
+- **Recovery.** A Cursor auth failure before any work is retried once on a
+  fresh connection. A cancelled turn stops the Cursor run.
+
+## How it works
+
+```
+OpenClaw gateway ──turn──▶ cursor-cli backend (this plugin)
+   │  prompt, session id, tool cap,          │
+   │  --mcp-config (per-turn grant)          ▼
+   │                                  @cursor/sdk local agent  ──▶ Cursor API
+   │                                    │  native tools (shell, read, edit …)
+   │◀── tools/call (turn grant) ────────┘  customTools = OpenClaw tools
+   ▼
+reply / NO_REPLY, usage, session id
+```
+
+1. OpenClaw calls the backend's `prepareExecution` with the run's tool
+   availability, thinking level and context window. The plugin checks that it
+   can enforce the tool cap, or throws.
+2. `execute` opens or reuses the session's Cursor agent and lists the turn's
+   OpenClaw tools from the loopback MCP server named in `--mcp-config`. It then
+   sends the prompt and streams Cursor's events back as `claude-stream-json`
+   records.
+3. Tool calls to OpenClaw go through the same loopback server with that turn's
+   Bearer token and capture key. Outside the turn the grant is no longer valid.
+
+Three transports are available:
+
+| `transport` | How turns run | OpenClaw tools | Tool caps |
+| --- | --- | --- | --- |
+| `sdk` (default) | long-lived `@cursor/sdk` local agents | yes | enforced (all-or-nothing for native tools) |
+| `acp` | one persistent `cursor-agent acp` process | only if Cursor loads ACP session MCP servers | not enforced |
+| `print` | one `cursor-agent -p` per turn | no | not enforced |
 
 ## Requirements
 
-- OpenClaw 2026.10 or newer, running on Node 24.
-- A Cursor API key (`CURSOR_API_KEY`, or a file referenced by `apiKeyFile`).
-- Network access from the gateway to Cursor. Behind an HTTP proxy, start the
-  gateway with a proxy-aware fetch (OpenClaw's proxy preload) and keep
-  `useHttp1: true` (the default).
-- `cursor-agent` on `PATH` only for the `acp` and `print` transports.
+- OpenClaw 2026.10 or newer on Node.js 24.16 or newer. These are OpenClaw's own
+  requirements.
+- A Cursor API key: `CURSOR_API_KEY`, or a file named by `apiKeyFile`. Keep the
+  file at mode `600`.
+- Network access from the gateway to Cursor. Behind an HTTP proxy, the gateway
+  process must route `fetch` through the proxy (for example with
+  `NODE_USE_ENV_PROXY=1`). The default `useHttp1: true` avoids proxies that break
+  HTTP/2. If requests leave from a region Cursor's model providers do not serve,
+  runs fail with "model provider is not supported in your region".
+- `cursor-agent` on `PATH`, for the `acp` and `print` transports only.
 
 ## Install
 
 ```bash
-git clone <this repo> ~/openclaw-cursor-cli
+git clone https://github.com/<owner>/openclaw-cursor-cli ~/openclaw-cursor-cli
 cd ~/openclaw-cursor-cli
-npm install --omit=peer --legacy-peer-deps
-openclaw plugins install --link ~/openclaw-cursor-cli
+npm ci --omit=dev --legacy-peer-deps      # the openclaw peer comes from your gateway
+openclaw plugins install --link --accept-capabilities ~/openclaw-cursor-cli
 ```
 
-Install or reinstall while the gateway is stopped: a live plugin replacement
-can leave in-flight turns retired.
+Install and reinstall with the gateway running. Avoid `openclaw plugins reload`
+while turns are in flight, because it can retire a running call. Restart the
+gateway instead once it is idle.
 
 ## Configure
 
@@ -62,9 +100,10 @@ can leave in-flight turns retired.
         enabled: true,
         config: {
           apiKeyFile: "~/.config/cursor/api-key",   // or set CURSOR_API_KEY
-          // transport: "sdk",                      // default; "acp" | "print"
-          // useHttp1: true,
-          // modelDefaults: { context: "300k" },    // "1m" for the 1M window
+          // transport: "sdk",                      // "acp" | "print"
+          // useHttp1: true,                        // process-wide, read once
+          // modelDefaults: { context: "300k" },    // default context for claude-* models
+          // agentIdleMinutes: 360,                 // close idle cached agents
         },
       },
     },
@@ -72,9 +111,10 @@ can leave in-flight turns retired.
   agents: {
     defaults: {
       models: {
+        // params.thinking: default effort when the global thinkingDefault differs
         "cursor-cli/claude-opus-5-5-medium": { alias: "cursor", params: { thinking: "medium" } },
       },
-      modelPolicy: { allow: ["cursor-cli/claude-opus-5-5-medium" /* , … */] },
+      modelPolicy: { allow: ["cursor-cli/claude-opus-5-5-medium"] },
     },
     entries: {
       "my-agent": { model: { primary: "cursor-cli/claude-opus-5-5-medium" } },
@@ -83,51 +123,74 @@ can leave in-flight turns retired.
 }
 ```
 
-Model refs are `cursor-cli/<cursor model id>[-<effort>]`, for example
-`cursor-cli/claude-opus-5-5-high`, `cursor-cli/gpt-5.6-sol-medium`,
-`cursor-cli/composer-2.5` or `cursor-cli/auto`. A trailing effort becomes the
-Cursor `effort` parameter; Claude models also get `context=300k` (configurable)
-and `fast=false`.
+### Model refs
 
-Set `params.thinking` on the model entry when the global `thinkingDefault`
-differs from the effort you want by default; `/think` overrides it per session.
+Write model refs as `cursor-cli/<cursor model id>[-<effort>]`. A trailing effort
+(`low`, `medium`, `high`, `xhigh`, `max`) becomes Cursor's `effort` parameter.
+`claude-*` models also get `context=300k` (see `modelDefaults.context`) and
+`fast=false`.
 
-## Transports
+The bundled model catalog covers only `claude-opus-5-5-{low,medium,high,xhigh,max}`.
+Other Cursor ids, such as `gpt-5.6-sol-medium`, `composer-2.5` or `auto`, are
+passed through and usually work. They have no catalog entry, so `/status`
+shows their context window as `?`, and they are less tested.
 
-| `transport` | How turns run | OpenClaw tools | Typical warm turn |
-| --- | --- | --- | --- |
-| `sdk` (default) | Long-lived `@cursor/sdk` local agents | yes | ~5 s + tool overhead |
-| `acp` | One persistent `cursor-agent acp` process | no (Cursor ignores ACP session MCP servers) | ~3 s |
-| `print` | One `cursor-agent -p` process per turn | no | ~9 s |
+## Security model
 
-## Known limitations
+Read this before enabling the plugin for untrusted senders.
 
-- Cursor reports one usage total per run. The per-call context sample divides
-  it by the number of model calls (tool calls + 1), so `/status` context is an
-  estimate.
-- Cursor's native tools are always on; OpenClaw exec approvals do not gate them
-  (same as `claude-cli` in bypass mode). `force: false` routes ACP permission
-  prompts to OpenClaw.
-- Tool caps (automations, cron jobs, restricted senders, workspace-only
-  policies): OpenClaw tools are filtered exactly, but Cursor cannot switch
-  individual native tools off. A capped run is accepted only when every native
-  capability (read, write, edit, exec, web_search, web_fetch) is allowed; a
-  narrower native cap fails closed with "cursor-cli cannot enforce this run's
-  tool cap". The native tool list is reported to OpenClaw, so automations
-  created from a Cursor session record the full native capability set.
-- Side questions (`/btw`) run in Cursor's read-only plan mode, which still
-  allows read-only native tools.
-- Explicit `/compact` is not supported; Cursor compacts its own context.
+- **Native tools run with the gateway user's full authority.** Cursor's shell
+  and edit tools execute on the gateway host, and OpenClaw's exec approvals do
+  not gate them. This matches `claude-cli` in bypass-permissions mode. Prompt
+  injection, including through content returned by OpenClaw tools or web
+  fetches, can reach `shell`.
+- **Tool caps.** OpenClaw tools are filtered exactly to the run's allowed list.
+  Cursor's SDK cannot switch individual native tools off, so a capped run is
+  accepted only when the cap allows every native capability (read, write, edit,
+  exec, web_search, web_fetch). Otherwise the run is refused with "cursor-cli
+  cannot enforce this run's tool cap". If Cursor uses a native tool this plugin
+  has not classified, it logs the tool and refuses all capped runs until
+  `lib/tool-policy.js` covers it.
+- **Side questions** (`/btw`) run in Cursor's read-only plan mode when
+  uncapped. When a side question requires zero native tools, it is refused,
+  because Cursor still offers read-only tools in plan mode.
+- **Credentials.** The API key is read from the environment or the key file and
+  passed only to the SDK or to `cursor-agent`. OpenClaw's per-turn MCP grant
+  lives in memory for the turn. The `acp` and `print` transports give
+  `cursor-agent` an allow-listed environment.
+- **ACP relay.** The `acp` transport listens on `127.0.0.1` only, behind a random
+  secret path. Requests outside an active turn get 503.
+
+Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
+
+## Troubleshooting
+
+| Symptom | Likely cause and fix |
+| --- | --- |
+| `Model not available … not supported in your region` | Gateway traffic to Cursor does not go through your proxy. Enable a proxy-aware fetch for the gateway (`NODE_USE_ENV_PROXY=1` or your preload). |
+| `WritableIterable is closed` | An HTTP proxy breaking HTTP/2. Keep `useHttp1: true`. |
+| `Authentication error … try logging out and back in` once after a long idle period | Cursor's cached access token expired. The plugin retries once automatically, and a second failure falls back to the next model. |
+| `MCP server … blocked by team policy` (acp/print) | Your Cursor team blocks MCP servers. Use the default `sdk` transport, which needs no MCP. |
+| `cursor-cli cannot enforce this run's tool cap` | The run's cap is narrower than Cursor can enforce, or Cursor used an unclassified native tool (see the gateway log). |
+| `/status` shows `Context: …/?` | The model has no catalog entry (only `claude-opus-5-5-*` is catalogued). |
+| Reply shows `NO_REPLY` text or an "empty reply" error | Update to ≥0.4. The plugin normalises `NO_REPLY` after a messaging tool call. |
 
 ## Development
 
 ```bash
-npm test                    # offline unit tests (node --test)
-node test/live/sdk-smoke.mjs ~/.config/cursor/api-key   # live, needs a Cursor key
+npm test                                             # offline unit tests (node --test), no network
+node test/live/sdk-smoke.mjs ~/.config/cursor/api-key   # live: needs a Cursor key and network
 ```
 
-`test/live/` scripts talk to the real Cursor service and are not run by `npm test`.
+`test/live/` scripts talk to the real Cursor service. They are not run by
+`npm test` or CI. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-MIT
+MIT for this plugin's code ([LICENSE](LICENSE)).
+
+The plugin depends on `@cursor/sdk`, which is proprietary: © Anysphere Inc., all
+rights reserved, use subject to Cursor's Terms of Service. npm installs it from
+the npm registry. It is not part of this repository and is not covered by the
+MIT license. Using this plugin requires a Cursor account and acceptance of
+Cursor's terms.
