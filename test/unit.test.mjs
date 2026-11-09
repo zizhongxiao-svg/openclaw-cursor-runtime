@@ -109,18 +109,16 @@ test("effort-less refs: /think decides the effort, default medium, ultra -> max"
   assert.equal(describeModelSelection(resolveModelSelection("claude-opus-5-5", "high")), "claude-opus-5-5 context=300k effort=high");
 });
 
-test("model catalog: effort-less Opus row with all thinking levels; suffixed rows are deprecated aliases", () => {
+test("model catalog: one effort-less Opus row with exactly Cursor's thinking levels", () => {
   const manifest = JSON.parse(fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
   const rows = manifest.modelCatalog.providers["cursor-cli"].models;
-  const base = rows.find((r) => r.id === "claude-opus-5-5");
-  assert.ok(base && !base.status);
+  assert.deepEqual(rows.map((r) => r.id), ["claude-opus-5-5"]);
+  const base = rows[0];
+  assert.ok(!base.status);
   assert.equal(base.contextWindow, 300000);
   assert.deepEqual(base.thinkingLevelMap, { off: null, minimal: null, xhigh: "xhigh", max: "max" }); // /think offers exactly low..max
-  for (const e of ["low", "medium", "high", "xhigh", "max"]) {
-    const r = rows.find((x) => x.id === `claude-opus-5-5-${e}`);
-    assert.equal(r.status, "deprecated");
-    assert.equal(r.replacedBy, "claude-opus-5-5");
-  }
+  // Old effort-suffixed ids are declared as replaced (and still accepted at runtime by resolveModelSelection).
+  assert.deepEqual(base.replaces, ["claude-opus-5-5-low", "claude-opus-5-5-medium", "claude-opus-5-5-high", "claude-opus-5-5-xhigh", "claude-opus-5-5-max"]);
 });
 
 test("normalizeFinalText only collapses NO_REPLY variants after a messaging tool call", () => {

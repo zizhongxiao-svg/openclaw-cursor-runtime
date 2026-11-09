@@ -175,9 +175,11 @@ To confirm, check two places:
 `claude-*` models also get `context=300k` (`modelDefaults.context`, or the
 catalog's context window option) and `fast=false`.
 
-Refs with an effort suffix (`cursor-cli/claude-opus-5-5-high`) still work and
-fix the default effort, but `/think` overrides them. The catalog marks them as
-deprecated in favour of `cursor-cli/claude-opus-5-5`.
+Older refs with an effort suffix (`cursor-cli/claude-opus-5-5-high`) are no
+longer in the catalog, which declares them as replaced by
+`cursor-cli/claude-opus-5-5`. The runtime still accepts them: the suffix sets
+the default effort and `/think` overrides it. Move pinned sessions with
+`/model cursor-cli/claude-opus-5-5`.
 
 The bundled model catalog covers `claude-opus-5-5`. Other Cursor ids, such as
 `gpt-5.6-sol`, `composer-2.5` or `auto`, are passed through and usually work.

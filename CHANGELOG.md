@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.2] - 2026-11-09
+
+### Removed
+- The effort-suffixed catalog rows (`claude-opus-5-5-low` … `-max`). The model
+  list shows a single `cursor-cli/claude-opus-5-5`, which declares them as
+  replaced. Suffixed refs are still accepted at runtime.
+
 ## [0.4.1] - 2026-11-09
 
 ### Changed
