@@ -7,8 +7,16 @@ All notable changes to this project are documented here. The format follows
 ## [0.4.0] - 2026-11-09
 
 ### Changed
+- The recommended model ref is `cursor-cli/claude-opus-5-5`, with no effort
+  suffix: `/think` decides the Cursor effort (default `medium`, or
+  `modelDefaults.effort`). The catalog row declares the `xhigh` and `max`
+  thinking levels. `ultra` maps to `max`. Suffixed refs
+  (`claude-opus-5-5-high`, …) still work and are marked deprecated in the
+  catalog.
+- Each turn logs the model and effort actually sent to Cursor
+  (`cursor-cli: turn agent=… claude-opus-5-5 context=300k effort=high think=high`).
 - Renamed the package and repository to `openclaw-cursor-runtime`, published
-  at https://github.com/zizhongx/openclaw-cursor-runtime. The OpenClaw plugin
+  at https://github.com/zizhongxiao-svg/openclaw-cursor-runtime. The OpenClaw plugin
   and backend id stays `cursor-cli`, so existing `cursor-cli/<model>` refs keep
   working.
 - Side questions no longer declare `sideQuestionToolMode: "disabled"`. Cursor

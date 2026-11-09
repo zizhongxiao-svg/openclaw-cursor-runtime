@@ -9,6 +9,7 @@ import path from "node:path";
 import {
   AgentCache,
   createSdkExecute,
+  describeModelSelection,
   estimatePerCallUsage,
   isRetryableAuthError,
   normalizeFinalText,
@@ -95,6 +96,31 @@ test("resolveModelSelection: thinking overrides effort; catalog context option i
   assert.equal(resolveModelSelection("claude-opus-5-5-medium", "off").params[1].value, "low");
   assert.equal(resolveModelSelection("claude-opus-5-5-medium", "adaptive").params[1].value, "medium");
   assert.equal(resolveModelSelection("claude-opus-5-5-medium", "bogus").params[1].value, "medium");
+});
+
+test("effort-less refs: /think decides the effort, default medium, ultra -> max", () => {
+  const effortOf = (sel) => sel.params.find((p) => p.id === "effort")?.value;
+  assert.equal(effortOf(resolveModelSelection("claude-opus-5-5")), "medium");
+  assert.equal(effortOf(resolveModelSelection("claude-opus-5-5", "high")), "high");
+  assert.equal(effortOf(resolveModelSelection("claude-opus-5-5", "xhigh")), "xhigh");
+  assert.equal(effortOf(resolveModelSelection("claude-opus-5-5", "ultra")), "max");
+  assert.equal(effortOf(resolveModelSelection("claude-opus-5-5", undefined, { effort: "high" })), "high");
+  assert.equal(effortOf(resolveModelSelection("claude-opus-5-5-high", "low")), "low"); // /think beats the suffix
+  assert.equal(describeModelSelection(resolveModelSelection("claude-opus-5-5", "high")), "claude-opus-5-5 context=300k effort=high");
+});
+
+test("model catalog: effort-less Opus row with all thinking levels; suffixed rows are deprecated aliases", () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
+  const rows = manifest.modelCatalog.providers["cursor-cli"].models;
+  const base = rows.find((r) => r.id === "claude-opus-5-5");
+  assert.ok(base && !base.status);
+  assert.equal(base.contextWindow, 300000);
+  assert.deepEqual(Object.keys(base.thinkingLevelMap).sort(), ["max", "minimal", "xhigh"]);
+  for (const e of ["low", "medium", "high", "xhigh", "max"]) {
+    const r = rows.find((x) => x.id === `claude-opus-5-5-${e}`);
+    assert.equal(r.status, "deprecated");
+    assert.equal(r.replacedBy, "claude-opus-5-5");
+  }
 });
 
 test("normalizeFinalText only collapses NO_REPLY variants after a messaging tool call", () => {

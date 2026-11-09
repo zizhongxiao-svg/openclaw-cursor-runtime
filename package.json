@@ -6,11 +6,11 @@
   "author": "zizhongx <zizhong.xiao@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zizhongx/openclaw-cursor-runtime.git"
+    "url": "git+https://github.com/zizhongxiao-svg/openclaw-cursor-runtime.git"
   },
-  "homepage": "https://github.com/zizhongx/openclaw-cursor-runtime#readme",
+  "homepage": "https://github.com/zizhongxiao-svg/openclaw-cursor-runtime#readme",
   "bugs": {
-    "url": "https://github.com/zizhongx/openclaw-cursor-runtime/issues"
+    "url": "https://github.com/zizhongxiao-svg/openclaw-cursor-runtime/issues"
   },
   "type": "module",
   "main": "index.js",

@@ -10,9 +10,10 @@ const WRAPPER = path.join(here, "bin", "cursor-openclaw.mjs");
 
 // OpenClaw model id -> Cursor ACP model id (print mode uses the plain id).
 const ACP_MODEL_ALIASES = {
+  "claude-opus-5-5": "claude-opus-5-5[context=300k,effort=medium,fast=false]",
   "claude-opus-5-5-medium": "claude-opus-5-5[context=300k,effort=medium,fast=false]",
 };
-const MODEL_ALIASES = { opus: "claude-opus-5-5-medium", auto: "auto" };
+const MODEL_ALIASES = { opus: "claude-opus-5-5-medium", "claude-opus-5-5": "claude-opus-5-5-medium", auto: "auto" };
 
 function str(v) {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;

@@ -56,9 +56,21 @@
         "properties": {
           "context": {
             "type": "string"
+          },
+          "effort": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "xhigh",
+              "max"
+            ],
+            "description": "Default Cursor effort for models without an effort suffix when /think is not set (default medium for claude-*)"
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Defaults applied to Cursor model selections"
       },
       "agentIdleMinutes": {
         "type": "number",
@@ -71,6 +83,42 @@
     "providers": {
       "cursor-cli": {
         "models": [
+          {
+            "id": "claude-opus-5-5",
+            "name": "Claude Opus 5.5 (Cursor)",
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ],
+            "contextWindow": 300000,
+            "contextWindows": [
+              {
+                "id": "300k",
+                "label": "300K",
+                "contextWindow": 300000
+              },
+              {
+                "id": "1m",
+                "label": "1M",
+                "contextWindow": 1000000
+              }
+            ],
+            "contextWindowDefault": "300k",
+            "maxTokens": 128000,
+            "thinkingLevelMap": {
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            },
+            "replaces": [
+              "claude-opus-5-5-low",
+              "claude-opus-5-5-medium",
+              "claude-opus-5-5-high",
+              "claude-opus-5-5-xhigh",
+              "claude-opus-5-5-max"
+            ]
+          },
           {
             "id": "claude-opus-5-5-low",
             "name": "Claude Opus 5.5 Low (Cursor)",
@@ -93,7 +141,15 @@
               }
             ],
             "contextWindowDefault": "300k",
-            "maxTokens": 128000
+            "maxTokens": 128000,
+            "status": "deprecated",
+            "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
+            "replacedBy": "claude-opus-5-5",
+            "thinkingLevelMap": {
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            }
           },
           {
             "id": "claude-opus-5-5-medium",
@@ -117,7 +173,15 @@
               }
             ],
             "contextWindowDefault": "300k",
-            "maxTokens": 128000
+            "maxTokens": 128000,
+            "status": "deprecated",
+            "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
+            "replacedBy": "claude-opus-5-5",
+            "thinkingLevelMap": {
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            }
           },
           {
             "id": "claude-opus-5-5-high",
@@ -141,7 +205,15 @@
               }
             ],
             "contextWindowDefault": "300k",
-            "maxTokens": 128000
+            "maxTokens": 128000,
+            "status": "deprecated",
+            "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
+            "replacedBy": "claude-opus-5-5",
+            "thinkingLevelMap": {
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            }
           },
           {
             "id": "claude-opus-5-5-xhigh",
@@ -165,7 +237,15 @@
               }
             ],
             "contextWindowDefault": "300k",
-            "maxTokens": 128000
+            "maxTokens": 128000,
+            "status": "deprecated",
+            "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
+            "replacedBy": "claude-opus-5-5",
+            "thinkingLevelMap": {
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            }
           },
           {
             "id": "claude-opus-5-5-max",
@@ -189,7 +269,15 @@
               }
             ],
             "contextWindowDefault": "300k",
-            "maxTokens": 128000
+            "maxTokens": 128000,
+            "status": "deprecated",
+            "statusReason": "Use cursor-cli/claude-opus-5-5 and /think for the effort.",
+            "replacedBy": "claude-opus-5-5",
+            "thinkingLevelMap": {
+              "minimal": "low",
+              "xhigh": "xhigh",
+              "max": "max"
+            }
           }
         ]
       }
@@ -200,7 +288,7 @@
   },
   "modelSupport": {
     "modelPrefixes": [
-      "claude-opus-5-5-"
+      "claude-opus-5-5"
     ]
   }
 }

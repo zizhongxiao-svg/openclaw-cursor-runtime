@@ -16,7 +16,7 @@ search).
 ## Quick start
 
 ```bash
-git clone https://github.com/zizhongx/openclaw-cursor-runtime ~/openclaw-cursor-runtime
+git clone https://github.com/zizhongxiao-svg/openclaw-cursor-runtime ~/openclaw-cursor-runtime
 cd ~/openclaw-cursor-runtime && npm ci --omit=dev --legacy-peer-deps
 openclaw plugins install --link --accept-capabilities ~/openclaw-cursor-runtime
 echo "$CURSOR_API_KEY" > ~/.config/cursor/api-key && chmod 600 ~/.config/cursor/api-key
@@ -27,11 +27,11 @@ in [Configure](#configure)):
 
 ```json5
 plugins: { entries: { "cursor-cli": { enabled: true, config: { apiKeyFile: "~/.config/cursor/api-key" } } } },
-agents: { entries: { "my-agent": { model: { primary: "cursor-cli/claude-opus-5-5-medium" } } } },
+agents: { entries: { "my-agent": { model: { primary: "cursor-cli/claude-opus-5-5" } } } },
 ```
 
 Restart the gateway, then send the agent a message. `/status` should show
-`Model: cursor-cli/claude-opus-5-5-medium`.
+`Model: cursor-cli/claude-opus-5-5`.
 
 The package is named `openclaw-cursor-runtime`. Inside OpenClaw the plugin and
 backend id is `cursor-cli`, following the bundled `claude-cli` naming, so model
@@ -51,7 +51,7 @@ refs look like `cursor-cli/<model>`.
 - **Tool caps.** Automations, cron jobs and restricted runs are enforced or
   refused (fail closed). See [Security model](#security-model).
 - **`/think` maps to Cursor effort** (`low` … `max`). A model catalog gives
-  `cursor-cli/claude-opus-5-5-*` a 300K default window (1M selectable).
+  `cursor-cli/claude-opus-5-5` a 300K default window (1M selectable).
 - **Image input**, streaming text, and token usage. Cached tokens are not
   counted twice, and a per-call context sample feeds `/status`.
 - **Recovery.** A Cursor auth failure before any work is retried once on a
@@ -104,7 +104,7 @@ Three transports are available:
 ## Install
 
 ```bash
-git clone https://github.com/zizhongx/openclaw-cursor-runtime ~/openclaw-cursor-runtime
+git clone https://github.com/zizhongxiao-svg/openclaw-cursor-runtime ~/openclaw-cursor-runtime
 cd ~/openclaw-cursor-runtime
 npm ci --omit=dev --legacy-peer-deps      # the openclaw peer comes from your gateway
 openclaw plugins install --link --accept-capabilities ~/openclaw-cursor-runtime
@@ -136,28 +136,48 @@ gateway instead once it is idle.
     defaults: {
       models: {
         // params.thinking: default effort when the global thinkingDefault differs
-        "cursor-cli/claude-opus-5-5-medium": { alias: "cursor", params: { thinking: "medium" } },
+        "cursor-cli/claude-opus-5-5": { alias: "cursor", params: { thinking: "medium" } },
       },
-      modelPolicy: { allow: ["cursor-cli/claude-opus-5-5-medium"] },
+      modelPolicy: { allow: ["cursor-cli/claude-opus-5-5"] },
     },
     entries: {
-      "my-agent": { model: { primary: "cursor-cli/claude-opus-5-5-medium" } },
+      "my-agent": { model: { primary: "cursor-cli/claude-opus-5-5" } },
     },
   },
 }
 ```
 
-### Model refs
+### Model refs and `/think`
 
-Write model refs as `cursor-cli/<cursor model id>[-<effort>]`. A trailing effort
-(`low`, `medium`, `high`, `xhigh`, `max`) becomes Cursor's `effort` parameter.
-`claude-*` models also get `context=300k` (see `modelDefaults.context`) and
-`fast=false`.
+Use `cursor-cli/claude-opus-5-5`. The effort comes from OpenClaw's thinking
+level, so `/think high` in a chat switches the next turns to Cursor
+`effort=high`, with no change of model.
 
-The bundled model catalog covers only `claude-opus-5-5-{low,medium,high,xhigh,max}`.
-Other Cursor ids, such as `gpt-5.6-sol-medium`, `composer-2.5` or `auto`, are
-passed through and usually work. They have no catalog entry, so `/status`
-shows their context window as `?`, and they are less tested.
+| `/think` | Cursor effort |
+| --- | --- |
+| `off`, `minimal`, `low` | `low` |
+| `medium`, `adaptive`, default | `medium` (or `modelDefaults.effort`) |
+| `high` | `high` |
+| `xhigh` | `xhigh` |
+| `max`, `ultra` | `max` |
+
+To confirm, check two places:
+
+- `/status`: the `Modes: think <level>` line shows the session's level.
+- The gateway log: each turn logs a line such as
+  `cursor-cli: turn agent=… claude-opus-5-5 context=300k effort=high think=high`.
+
+`claude-*` models also get `context=300k` (`modelDefaults.context`, or the
+catalog's context window option) and `fast=false`.
+
+Refs with an effort suffix (`cursor-cli/claude-opus-5-5-high`) still work and
+fix the default effort, but `/think` overrides them. The catalog marks them as
+deprecated in favour of `cursor-cli/claude-opus-5-5`.
+
+The bundled model catalog covers `claude-opus-5-5`. Other Cursor ids, such as
+`gpt-5.6-sol`, `composer-2.5` or `auto`, are passed through and usually work.
+They have no catalog entry, so `/status` shows their context window as `?`, and
+they are less tested.
 
 ## Security model
 
@@ -196,7 +216,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 | `Authentication error … try logging out and back in` once after a long idle period | Cursor's cached access token expired. The plugin retries once automatically, and a second failure falls back to the next model. |
 | `MCP server … blocked by team policy` (acp/print) | Your Cursor team blocks MCP servers. Use the default `sdk` transport, which needs no MCP. |
 | `cursor-cli cannot enforce this run's tool cap` | The run's cap is narrower than Cursor can enforce, or Cursor used an unclassified native tool (see the gateway log). |
-| `/status` shows `Context: …/?` | The model has no catalog entry (only `claude-opus-5-5-*` is catalogued). |
+| `/status` shows `Context: …/?` | The model has no catalog entry (only `claude-opus-5-5` is catalogued). |
 | Reply shows `NO_REPLY` text or an "empty reply" error | Update to ≥0.4. The plugin normalises `NO_REPLY` after a messaging tool call. |
 
 ## Development
