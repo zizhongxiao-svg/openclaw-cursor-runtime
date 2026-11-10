@@ -20,7 +20,8 @@ function str(v) {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
-const DEFAULT_AUTO_COMPACT_TOKENS = 80000;
+// Like Claude Code: compact automatically only when the context window is nearly full.
+const DEFAULT_AUTO_COMPACT_PERCENT = 90;
 const DEFAULT_PREWARM_DELAY_S = 180;
 const PREWARM_SCHEDULED = Symbol.for("openclaw-cursor-runtime.prewarmScheduled");
 
@@ -58,7 +59,8 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
     ...(typeof pluginConfig.agentIdleMinutes === "number" ? { agentIdleMs: pluginConfig.agentIdleMinutes * 60 * 1000 } : {}),
     // Agents, compaction aliases/seeds and tool definitions survive gateway restarts.
     ...(pluginConfig.persistState !== false ? { stateFile: str(pluginConfig.stateFile) ?? defaultStateFile() } : {}),
-    autoCompactTokens: typeof pluginConfig.autoCompactTokens === "number" ? pluginConfig.autoCompactTokens : DEFAULT_AUTO_COMPACT_TOKENS,
+    ...(typeof pluginConfig.autoCompactTokens === "number" ? { autoCompactTokens: pluginConfig.autoCompactTokens } : {}),
+    autoCompactPercent: typeof pluginConfig.autoCompactPercent === "number" ? pluginConfig.autoCompactPercent : DEFAULT_AUTO_COMPACT_PERCENT,
     log,
   };
   const sdkExecute = createSdkExecute(sdkOptions);

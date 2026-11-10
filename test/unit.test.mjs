@@ -52,7 +52,7 @@ import {
 } from "../lib/tool-policy.js";
 import { buildCursorCliBackend, validateCompactOutput } from "../index.js";
 import { SessionState, buildCompactionPrompt, wrapWithSeed } from "../lib/session-state.js";
-import { compactAgent, contextTokens, prewarmSdk } from "../lib/sdk-runtime.js";
+import { autoCompactThreshold, compactAgent, contextTokens, contextWindowTokens, prewarmSdk } from "../lib/sdk-runtime.js";
 
 // Backends built by tests must never touch the real ~/.cache state file.
 process.env.OPENCLAW_CURSOR_STATE_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ccli-state-")), "state.json");
@@ -618,6 +618,38 @@ test("auto-compaction runs in the background past the threshold; the next turn w
   assert.equal(ss.resolve("auto-1"), "agent-1");
   assert.equal(state.sends[2].agentId, "agent-1");
   assert.match(logs.join("\n"), /compacted agent=auto-1 -> agent-1/);
+});
+
+test("auto-compaction threshold is a share of the context window, like Claude Code", async () => {
+  const sel = (ctx) => resolveModelSelection("claude-opus-5-5-medium", undefined, ctx ? { context: ctx } : {});
+  assert.equal(contextWindowTokens(sel()), 300_000);
+  assert.equal(contextWindowTokens(sel("1m")), 1_000_000);
+  assert.equal(contextWindowTokens({ id: "composer-2.5" }), undefined);
+  assert.equal(autoCompactThreshold(sel(), { percent: 90 }), 270_000);
+  assert.equal(autoCompactThreshold(sel("1m"), { percent: 90 }), 900_000);
+  assert.equal(autoCompactThreshold(sel(), { percent: 90, tokens: 150_000 }), 150_000); // absolute wins
+  assert.equal(autoCompactThreshold(sel(), {}), 0);
+  assert.equal(autoCompactThreshold({ id: "composer-2.5" }, { percent: 90 }), 0); // unknown window: off
+  // 107K (the slow WeChat session) stays; 280K of 300K compacts.
+  const { sdk, state } = fakeSdk([
+    { result: { status: "finished", result: "a", usage: { inputTokens: 107_000 } } },
+    { result: { status: "finished", result: "b", usage: { inputTokens: 280_000 } } },
+    { events: [{ type: "assistant", message: { content: [{ type: "text", text: SUMMARY }] } }], result: { status: "finished", result: SUMMARY } },
+  ]);
+  const ss = new SessionState();
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss, autoCompactPercent: 90, compactDelayMs: 0 });
+  await collect(exec(baseCtx({ useResume: true, sessionId: "pct-1" })));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(ss.resolve("pct-1"), "pct-1");
+  await collect(exec(baseCtx({ useResume: true, sessionId: "pct-1" })));
+  for (let i = 0; i < 50 && ss.resolve("pct-1") === "pct-1"; i++) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(ss.resolve("pct-1"), "agent-1");
+  assert.equal(state.sends.length, 3);
+});
+
+test("plugin default: compaction at 90% of the window, not at a fixed token count", () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL("../openclaw.plugin.json", import.meta.url), "utf8"));
+  assert.match(manifest.configSchema.properties.autoCompactPercent.description, /default 90/);
 });
 
 test("below the threshold (or with it off) nothing is compacted", async () => {

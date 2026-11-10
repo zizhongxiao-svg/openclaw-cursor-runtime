@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.8] - 2026-11-10
+
+### Changed
+- Automatic compaction follows Claude Code: it runs only when one model call
+  fills `autoCompactPercent` of the context window (default 90%, 270K of the
+  300K default; 900K with the 1M window). 0.4.7 compacted from 80K tokens, which
+  drops conversation detail and prompt-cache hits for every compaction.
+  `autoCompactTokens` is now an optional absolute threshold that overrides the
+  percentage. `/compact` is unchanged.
+
 ## [0.4.7] - 2026-11-10
 
 ### Added
@@ -14,7 +24,8 @@ All notable changes to this project are documented here. The format follows
   prompt and the summary. Turns that still carry the old session id are routed to
   the successor; a turn arriving during a compaction waits for it.
 - Automatic background compaction once one model call carries more than
-  `autoCompactTokens` context tokens (default 80000, `0` turns it off). In
+  `autoCompactTokens` context tokens (default 80000 in this release, `0` turns
+  it off; 0.4.8 switched to a share of the window). In
   production the WeChat agent reached ~107K tokens per call and Cursor's first
   response took 15–25 s, against 6–7 s for a fresh agent; Cursor's own
   summarisation only starts near the 300K window.

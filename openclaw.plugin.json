@@ -2,7 +2,7 @@
   "id": "cursor-cli",
   "name": "Cursor Runtime",
   "description": "Run Cursor agents as an OpenClaw model runtime",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "cliBackends": [
     "cursor-cli"
   ],
@@ -84,7 +84,13 @@
       "autoCompactTokens": {
         "type": "number",
         "minimum": 0,
-        "description": "sdk transport: compact a session in the background once one model call carries more than this many context tokens (default 80000; 0 turns automatic compaction off). /compact always works."
+        "description": "sdk transport: absolute context-token threshold for background compaction; overrides autoCompactPercent when set (0 or unset: use the percentage). /compact always works."
+      },
+      "autoCompactPercent": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100,
+        "description": "sdk transport: compact a session in the background once one model call fills this percentage of the context window, as Claude Code does (default 90; 0 turns automatic compaction off)"
       },
       "persistState": {
         "type": "boolean",

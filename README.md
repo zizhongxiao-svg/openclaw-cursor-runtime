@@ -50,10 +50,12 @@ refs look like `cursor-cli/<model>`.
   reseeds the new agent from the OpenClaw transcript.
 - **Compaction, like `claude-cli`.** `/compact [instructions]` asks the Cursor
   agent for a continuation summary and moves the session to a fresh agent that
-  starts from it. The same runs automatically in the background once one model
-  call carries more than `autoCompactTokens` (default 80K): Cursor's first
-  response grows from about 6 s to 15–25 s at around 100K tokens, long before its
-  own summarisation near the window limit.
+  starts from it. As in Claude Code, the same runs automatically (in the
+  background, after the reply) only when one model call fills
+  `autoCompactPercent` of the context window (default 90%, i.e. 270K of 300K).
+  Compacting earlier makes long sessions answer faster (Cursor's first response
+  grows from about 6 s to 15–25 s at around 100K tokens) but drops detail and
+  prompt-cache hits; use `/compact` or `autoCompactTokens` for that.
 - **Warm restarts.** Recent agents, compaction state and OpenClaw tool
   definitions (names, descriptions, schemas; never credentials) are kept in
   `~/.cache/openclaw-cursor-runtime/state.json`. A few minutes after start-up the
@@ -138,7 +140,8 @@ gateway instead once it is idle.
           // useHttp1: true,                        // process-wide, read once
           // modelDefaults: { context: "300k" },    // default context for claude-* models
           // agentIdleMinutes: 360,                 // close idle cached agents
-          // autoCompactTokens: 80000,              // background compaction threshold (0: off)
+          // autoCompactPercent: 90,                 // background compaction at 90% of the window (0: off)
+          // autoCompactTokens: 150000,             // or an absolute threshold instead
           // prewarm: true, prewarmDelaySeconds: 180,
           // persistState: true,                    // stateFile: "~/.cache/openclaw-cursor-runtime/state.json"
         },
