@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.9] - 2026-11-10
+
+### Fixed
+- The retry after "Authentication error … try logging out and back in" now
+  really reconnects. The SDK keeps the exchanged access token inside a local
+  executor shared per working directory and API key, and only re-exchanges it on
+  a transport-level Unauthenticated error, not when a run reports the error.
+  `agent.close()` returns before that executor is released, so the immediate
+  `Agent.resume` got the same executor and expired token back, and the retry
+  failed too (seen after ~4.7 h idle: every turn failed until a gateway
+  restart). The retry now waits for `agent[Symbol.asyncDispose]()`, so the
+  reopened agent gets a new executor that exchanges the API key again.
+
 ## [0.4.8] - 2026-11-10
 
 ### Changed

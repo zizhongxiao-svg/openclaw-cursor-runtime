@@ -64,7 +64,7 @@ process.env.OPENCLAW_CURSOR_STATE_FILE = path.join(fs.mkdtempSync(path.join(os.t
  *   { throwOnSend?: string, events?: object[], hang?: boolean, result?: object }
  */
 function fakeSdk(script) {
-  const state = { created: 0, resumed: 0, sends: [], runs: [], agents: [] };
+  const state = { created: 0, resumed: 0, sends: [], runs: [], agents: [], events: [] };
   class FakeRun {
     constructor(b) { this.b = b; this.cancelled = false; }
     async *stream() {
@@ -86,12 +86,19 @@ function fakeSdk(script) {
       return run;
     }
     close() { this.closed = true; }
+    // Like the SDK: resolves once the shared local executor has been released.
+    async [Symbol.asyncDispose]() {
+      await new Promise((r) => setTimeout(r, 5));
+      this.closed = true;
+      this.disposed = true;
+      state.events.push(`disposed:${this.agentId}`);
+    }
   }
   const sdk = {
     Cursor: { configure() {} },
     Agent: {
       create: async () => { state.created += 1; return new FakeAgent(`agent-${state.created}`); },
-      resume: async (id) => { state.resumed += 1; return new FakeAgent(id); },
+      resume: async (id) => { state.resumed += 1; state.events.push(`resumed:${id}`); return new FakeAgent(id); },
     },
   };
   return { sdk, state };
@@ -202,6 +209,11 @@ test("execute: auth error before any progress is retried once (status error and 
     assert.equal(state.sends.length, 2);
     assert.equal(state.resumed, 1);
     assert.equal(state.agents[0].closed, true);
+    // The old agent is fully disposed (its executor and cached token dropped) before the
+    // retry reopens it, so the retry exchanges the API key again.
+    assert.equal(state.agents[0].disposed, true);
+    const i = state.events.indexOf(`disposed:${state.agents[0].agentId}`);
+    assert.ok(i >= 0 && state.events.indexOf(`resumed:${state.agents[0].agentId}`, 0) > i);
   }
 });
 

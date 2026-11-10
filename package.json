@@ -1,6 +1,6 @@
 {
   "name": "openclaw-cursor-runtime",
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Run Cursor agents as an OpenClaw model runtime (CLI backend plugin) with OpenClaw tools, tool caps and long-lived sessions",
   "license": "MIT",
   "author": "zizhongx <zizhong.xiao@gmail.com>",
