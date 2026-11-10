@@ -61,13 +61,20 @@ process.env.OPENCLAW_CURSOR_STATE_FILE = path.join(fs.mkdtempSync(path.join(os.t
 
 /**
  * Each entry of `script` drives one agent.send():
- *   { throwOnSend?: string, events?: object[], hang?: boolean, result?: object }
+ *   { throwOnSend?: string, events?: object[], hang?: boolean, result?: object,
+ *     sendDelayMs?: number, firstEventDelayMs?: number,
+ *     streamUrl?: string, silentAttempts?: number, streamAttempts?: number }
+ * silentAttempts / streamAttempts: RunSSE requests the run makes (never connected / completed).
  */
+let fakeRunSeq = 0;
 function fakeSdk(script) {
   const state = { created: 0, resumed: 0, sends: [], runs: [], agents: [], events: [] };
   class FakeRun {
-    constructor(b) { this.b = b; this.cancelled = false; }
+    constructor(b) { this.b = b; this.cancelled = false; this.requestId = `fake-run-${++fakeRunSeq}`; }
     async *stream() {
+      for (let i = 0; i < (this.b.silentAttempts ?? 0); i++) silentRunSse(this.b.streamUrl, this.requestId);
+      for (let i = 0; i < (this.b.streamAttempts ?? 0); i++) await postRunSse(this.b.streamUrl, this.requestId);
+      if (this.b.firstEventDelayMs) await new Promise((r) => setTimeout(r, this.b.firstEventDelayMs));
       for (const m of this.b.events ?? []) yield m;
       if (this.b.hang) await new Promise((r) => { this.release = r; });
     }
@@ -79,6 +86,7 @@ function fakeSdk(script) {
     async send(message, options) {
       state.sends.push({ message, options, agentId: this.agentId });
       const b = script.shift() ?? {};
+      if (b.sendDelayMs) await new Promise((r) => setTimeout(r, b.sendDelayMs));
       if (b.throwOnSend) throw new Error(b.throwOnSend);
       if (b.callTool) b.toolResult = await options.local.customTools[b.callTool].execute(b.callArgs ?? { text: "hi" }, {});
       const run = new FakeRun(b);
@@ -102,6 +110,24 @@ function fakeSdk(script) {
     },
   };
   return { sdk, state };
+}
+
+/** One HTTP request shaped like an SDK stream attempt (RunSSE path, run's request id header). */
+function postRunSse(base, requestId) {
+  return new Promise((resolve, reject) => {
+    http.request(`${base}/agent.v1.AgentService/RunSSE`, { method: "POST", headers: { "x-original-request-id": requestId } }, (res) => res.resume().on("end", resolve))
+      .on("error", reject)
+      .end();
+  });
+}
+
+/** A stream attempt whose connection never comes up (a proxy tunnel that never opens), then aborted. */
+function silentRunSse(base, requestId) {
+  const agent = new (class extends http.Agent { addRequest() {} })();
+  const req = http.request(`${base}/agent.v1.AgentService/RunSSE`, { method: "POST", agent, headers: { "x-original-request-id": requestId } });
+  req.on("error", () => {});
+  req.end();
+  req.destroy();
 }
 
 function baseCtx(extra = {}) {
@@ -214,6 +240,47 @@ test("execute: auth error before any progress is retried once (status error and 
     assert.equal(state.agents[0].disposed, true);
     const i = state.events.indexOf(`disposed:${state.agents[0].agentId}`);
     assert.ok(i >= 0 && state.events.indexOf(`resumed:${state.agents[0].agentId}`, 0) > i);
+  }
+});
+
+test("execute: the timing line reports time spent inside agent.send apart from the wait for the first event", async () => {
+  const text = { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } };
+  const timingOf = (logs) => {
+    const line = logs.find((m) => m.startsWith("cursor-cli: timing")) ?? "";
+    return { line, send: Number(/ send=(\d+)/.exec(line)?.[1]), first: Number(/ first=(\d+)/.exec(line)?.[1]) };
+  };
+  {
+    const logs = [];
+    const { sdk } = fakeSdk([{ sendDelayMs: 40, firstEventDelayMs: 80, events: [text], result: { status: "finished", result: "hi" } }]);
+    await collect(createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), log: (m) => logs.push(m) })(baseCtx()));
+    const t = timingOf(logs);
+    assert.ok(t.send >= 35 && t.send < 80, t.line); // the 40 ms send, not the 80 ms wait after it
+    assert.ok(t.first >= t.send + 75, t.line);
+    assert.match(t.line, / attempts=- /);
+  }
+  {
+    // An auth retry sends twice; the mark sums both calls.
+    const logs = [];
+    const { sdk } = fakeSdk([{ sendDelayMs: 30, throwOnSend: "Authentication error" }, { sendDelayMs: 30, events: [text], result: { status: "finished", result: "hi" } }]);
+    await collect(createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), log: (m) => logs.push(m) })(baseCtx()));
+    assert.ok(timingOf(logs).send >= 55, timingOf(logs).line);
+  }
+});
+
+test("execute: the timing line counts the Cursor stream attempts of the turn's runs", async () => {
+  const server = http.createServer((req, res) => req.resume().on("end", () => res.end()));
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const text = { type: "assistant", message: { content: [{ type: "text", text: "hi" }] } };
+    await postRunSse(url, "another-run"); // not this turn's run
+    const logs = [];
+    // SDK-internal stall retries: four attempts that never connected, then one that worked.
+    const { sdk } = fakeSdk([{ streamUrl: url, silentAttempts: 4, streamAttempts: 1, events: [text], result: { status: "finished", result: "hi" } }]);
+    await collect(createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), log: (m) => logs.push(m) })(baseCtx()));
+    assert.match(logs.find((m) => m.startsWith("cursor-cli: timing")) ?? "", / send=\d+ first=\d+ attempts=5 /);
+  } finally {
+    server.close();
   }
 });
 

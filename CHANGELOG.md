@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.10] - 2026-11-10
+
+### Added
+- The `cursor-cli: timing` line reports `send=<ms>`, the time spent inside
+  `agent.send` (summed over the auth retry), and `attempts=<n>`, how many
+  Cursor stream requests (RunSSE, HTTP/1.1 transport) the turn's runs made.
+  The SDK silently retries a stream that receives nothing for 30 s, after 2, 4,
+  8 and 16 s of backoff, so four silent attempts add ~150 s before the first
+  event. Two back-to-back WeChat turns waited ~185-190 s for their first event
+  (15-38 s is normal at that context size), which fits that pattern but could
+  not be told apart from a slow upload or model until now. `attempts=1` is a
+  normal turn; `-` means none were seen (HTTP/2 transport).
+
 ## [0.4.9] - 2026-11-10
 
 ### Fixed

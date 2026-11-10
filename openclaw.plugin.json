@@ -2,7 +2,7 @@
   "id": "cursor-cli",
   "name": "Cursor Runtime",
   "description": "Run Cursor agents as an OpenClaw model runtime",
-  "version": "0.4.9",
+  "version": "0.4.10",
   "cliBackends": [
     "cursor-cli"
   ],
