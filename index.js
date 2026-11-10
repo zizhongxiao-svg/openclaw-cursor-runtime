@@ -57,7 +57,7 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
       projectNativeToolAuthority: projectCursorNativeToolAuthority,
       prepareExecution: async (pctx) => {
         const plan = planToolAvailability(pctx?.toolAvailability);
-        if (!plan.enforceable) throw new Error(`cursor-cli cannot enforce this run's tool cap: ${plan.reason}`);
+        if (!plan.enforceable) throw new Error(`cursor-cli cannot enforce this run's tool cap: ${plan.reason}. Route tool-capped runs (e.g. memory-core dreaming.model) to a backend that can disable native tools.`);
         return {
           execute: (ctx) => sdkExecute({
             ...ctx,

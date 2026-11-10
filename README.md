@@ -222,7 +222,7 @@ Report vulnerabilities as described in [SECURITY.md](SECURITY.md).
 | `WritableIterable is closed` | An HTTP proxy breaking HTTP/2. Keep `useHttp1: true`. |
 | `Authentication error … try logging out and back in` once after a long idle period | Cursor's cached access token expired. The plugin retries once automatically, and a second failure falls back to the next model. |
 | `MCP server … blocked by team policy` (acp/print) | Your Cursor team blocks MCP servers. Use the default `sdk` transport, which needs no MCP. |
-| `cursor-cli cannot enforce this run's tool cap` | The run's cap is narrower than Cursor can enforce, or Cursor used an unclassified native tool (see the gateway log). |
+| `cursor-cli cannot enforce this run's tool cap` | The run's cap is narrower than Cursor can enforce, or Cursor used an unclassified native tool (see the gateway log). For memory-core Dream Diary runs (no tools allowed), set `plugins.entries.memory-core.config.dreaming.model` to a model on another backend and `plugins.entries.memory-core.subagent.allowModelOverride: true`. |
 | `/status` shows `Context: …/?` | The model has no catalog entry (only `claude-opus-5-5` is catalogued). |
 | Reply shows `NO_REPLY` text or an "empty reply" error | Update to ≥0.4. The plugin normalises `NO_REPLY` after a messaging tool call. |
 

@@ -498,3 +498,18 @@ test("backend shape matches the transport", async () => {
   buildCursorCliBackend({ force: false }, (m) => warnings.push(m));
   assert.match(warnings.join(""), /force=false has no effect/);
 });
+
+test("duplicate module loads share one agent cache (no re-resume on the second copy)", async () => {
+  const copyA = await import("../lib/sdk-runtime.js?copy=a");
+  const copyB = await import("../lib/sdk-runtime.js?copy=b");
+  assert.notEqual(copyA.createSdkExecute, copyB.createSdkExecute); // really two module instances
+  const { sdk, state } = fakeSdk([{ result: { status: "finished", result: "one" } }, { result: { status: "finished", result: "two" } }]);
+  const ctx = () => baseCtx({ useResume: true, sessionId: "shared-session", cwd: "/tmp/dup-load" });
+  // agentIdleMs used to give each backend build a private cache; it now tunes the shared one.
+  const execA = copyA.createSdkExecute({ sdk, agentIdleMs: 60 * 60 * 1000 });
+  const execB = copyB.createSdkExecute({ sdk, agentIdleMs: 60 * 60 * 1000 });
+  assert.equal((await collect(execA(ctx()))).at(-1).result, "one");
+  assert.equal((await collect(execB(ctx()))).at(-1).result, "two");
+  assert.equal(state.resumed, 1);
+  assert.equal(new Set(state.sends.map((s) => s.agentId)).size, 1);
+});

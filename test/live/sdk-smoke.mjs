@@ -50,9 +50,9 @@ const sid = await turn(1, "Remember code word plum-3. Then use the message tool 
 await turn(2, "Use the message tool again to send 'hello-2'. Reply with the tool result.", sid);
 await turn(3, "What colour is this image? One word.", sid, { args: ["--openclaw-image", img] });
 await turn(4, "Reply: ok", sid, { thinking: "high" });
-// simulate gateway restart: fresh module state is not possible here, so drop the cached agent by re-importing a fresh copy
+// simulate gateway restart: module copies share their caches (0.4.6), so start from an empty agent cache
 const fresh = await import(`../../lib/sdk-runtime.js?restart=${Date.now()}`);
-exec = fresh.createSdkExecute({ apiKeyFile: process.argv[2] });
+exec = fresh.createSdkExecute({ apiKeyFile: process.argv[2], cache: new fresh.AgentCache() });
 await turn(5, "What was the code word? Just it.", sid);
 await turn(6, "In one sentence: what is 2+2?", undefined, { mode: "side-question" });
 process.exit(0);

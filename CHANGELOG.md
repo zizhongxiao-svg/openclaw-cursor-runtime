@@ -4,6 +4,24 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.6] - 2026-11-10
+
+### Fixed
+- The Cursor agent, OpenClaw tool list and SDK caches are shared across
+  duplicate loads of the plugin. OpenClaw can register the plugin more than once
+  in one gateway, and each load had its own caches: a turn served by the other
+  load re-imported the SDK, re-opened the Cursor agent and re-listed tools
+  (`sdk=701 tools=999 agent=3934` right after a warm turn). Setting
+  `agentIdleMinutes` also gave every backend build a private agent cache; it now
+  tunes the shared one.
+- The "cannot enforce this run's tool cap" error names the fix for tool-capped
+  background runs (route them to another backend, e.g. memory-core
+  `dreaming.model`).
+
+### Added
+- The per-turn `cursor-cli: timing` line ends with `inst=<load>/t<thread>`, so
+  duplicate plugin loads are visible in the gateway log.
+
 ## [0.4.5] - 2026-11-09
 
 ### Changed
