@@ -50,7 +50,12 @@ import {
   projectCursorNativeToolAuthority,
   resetObservedNativeToolsForTest,
 } from "../lib/tool-policy.js";
-import { buildCursorCliBackend } from "../index.js";
+import { buildCursorCliBackend, validateCompactOutput } from "../index.js";
+import { SessionState, buildCompactionPrompt, wrapWithSeed } from "../lib/session-state.js";
+import { compactAgent, contextTokens, prewarmSdk } from "../lib/sdk-runtime.js";
+
+// Backends built by tests must never touch the real ~/.cache state file.
+process.env.OPENCLAW_CURSOR_STATE_FILE = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ccli-state-")), "state.json");
 
 // ---------------------------------------------------------------- fake @cursor/sdk
 
@@ -512,4 +517,146 @@ test("duplicate module loads share one agent cache (no re-resume on the second c
   assert.equal((await collect(execB(ctx()))).at(-1).result, "two");
   assert.equal(state.resumed, 1);
   assert.equal(new Set(state.sends.map((s) => s.agentId)).size, 1);
+});
+
+// ---------------------------------------------------------------- compaction, state, prewarm
+
+const SUMMARY = `User prefers Chinese replies. Goal: ship 0.4.7. Paths: /tmp/x. ${"detail ".repeat(40)}`;
+
+test("SessionState: aliases chain, seeds and tool lists survive a reload; no secrets needed", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ccli-ss-")), "s.json");
+  let t = 1000;
+  const s = new SessionState({ file, now: () => t });
+  s.noteAgent("a1", "/w", { id: "m" });
+  s.setAlias("a1", "a2");
+  s.setAlias("a2", "a3");
+  s.setSeed("a3", "sum");
+  s.setTools("k", [{ name: "message" }]);
+  s.noteAgent("a3", "/w", { id: "m" });
+  s.flush();
+  const r = new SessionState({ file, now: () => t });
+  assert.equal(r.resolve("a1"), "a3");
+  assert.equal(r.resolve("zz"), "zz");
+  assert.equal(r.seed("a3"), "sum");
+  assert.deepEqual(r.tools("k"), [{ name: "message" }]);
+  assert.deepEqual(r.recentAgents(10_000).map((a) => a.agentId), ["a3"]); // compacted a1 is not reopened
+  t += 20_000;
+  assert.deepEqual(r.recentAgents(10_000), []);
+  assert.equal((fs.statSync(file).mode & 0o777).toString(8), "600");
+});
+
+test("compaction prompt and seed wrapper", () => {
+  assert.match(buildCompactionPrompt(), /Do not use any tools/);
+  assert.match(buildCompactionPrompt("keep the file paths"), /Additional instructions from the user: keep the file paths/);
+  assert.match(wrapWithSeed("S", "hi"), /^<conversation_summary>[\s\S]*S\n<\/conversation_summary>\n\nhi$/);
+  assert.equal(contextTokens({ input_tokens: 10, cache_read_input_tokens: 100, cache_creation_input_tokens: 5 }), 115);
+  assert.equal(contextTokens(undefined), undefined);
+});
+
+test("backend declares manual compaction and validates the compact_boundary event", () => {
+  const b = buildCursorCliBackend({ prewarm: false });
+  assert.equal(b.ownsNativeCompaction, true);
+  assert.equal(b.manualCompaction.buildPrompt(), "/compact");
+  assert.equal(b.manualCompaction.buildPrompt(" keep paths "), "/compact keep paths");
+  assert.deepEqual(validateCompactOutput('{"type":"system","subtype":"init"}\n{"type":"system","subtype":"compact_boundary"}'), { ok: true });
+  assert.equal(validateCompactOutput('{"type":"result","result":"hi"}').ok, false);
+  assert.equal(buildCursorCliBackend({ transport: "acp", prewarm: false }).manualCompaction, undefined);
+});
+
+test("/compact summarises into a fresh agent; the next turn continues there with the summary", async () => {
+  const { sdk, state } = fakeSdk([
+    { events: [{ type: "assistant", message: { content: [{ type: "text", text: SUMMARY }] } }], result: { status: "finished", result: SUMMARY } },
+    { result: { status: "finished", result: "after" } },
+  ]);
+  const ss = new SessionState();
+  const cache = new AgentCache({ idleMs: 0 });
+  const exec = createSdkExecute({ sdk, cache, state: ss });
+  const out = await collect(exec(baseCtx({ useResume: true, sessionId: "old-1", prompt: "/compact keep paths", systemPrompt: "SYS" })));
+  assert.equal(state.sends[0].agentId, "old-1");
+  assert.equal(state.sends[0].options.mode, "plan");
+  assert.match(state.sends[0].message, /continuation summary[\s\S]*keep paths/);
+  const newId = "agent-1";
+  assert.deepEqual(out.map((r) => r.subtype ?? r.type), ["init", "compact_boundary", "success"]);
+  assert.equal(out[0].session_id, newId);
+  assert.equal(validateCompactOutput(out.map((r) => JSON.stringify(r)).join("\n")).ok, true);
+  assert.equal(ss.resolve("old-1"), newId);
+  assert.equal(state.agents.find((a) => a.agentId === "old-1").closed, true);
+  // OpenClaw may still hold the old id: the turn lands on the successor, with SYS + summary.
+  const next = await collect(exec(baseCtx({ useResume: true, sessionId: "old-1", prompt: "继续", systemPrompt: "SYS" })));
+  assert.equal(next[0].session_id, newId);
+  assert.equal(state.sends[1].agentId, newId);
+  assert.match(state.sends[1].message, /<system_instructions>\nSYS[\s\S]*<conversation_summary>[\s\S]*Goal: ship 0\.4\.7[\s\S]*继续$/);
+  assert.equal(ss.seed(newId), undefined); // seed used once
+  assert.equal(next.at(-1).result, "after");
+});
+
+test("/compact with a short or failed summary keeps the old agent", async () => {
+  const { sdk, state } = fakeSdk([{ result: { status: "finished", result: "too short" } }]);
+  const ss = new SessionState();
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss });
+  await assert.rejects(collect(exec(baseCtx({ useResume: true, sessionId: "keep-1", prompt: "/compact" }))), /summary too short/);
+  assert.equal(ss.resolve("keep-1"), "keep-1");
+  assert.equal(state.created, 0);
+});
+
+test("auto-compaction runs in the background past the threshold; the next turn waits for it", async () => {
+  const usage = { inputTokens: 90_000, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const { sdk, state } = fakeSdk([
+    { result: { status: "finished", result: "big", usage } },
+    { events: [{ type: "assistant", message: { content: [{ type: "text", text: SUMMARY }] } }], result: { status: "finished", result: SUMMARY } },
+    { result: { status: "finished", result: "small" } },
+  ]);
+  const ss = new SessionState();
+  const logs = [];
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss, autoCompactTokens: 80_000, compactDelayMs: 0, log: (m) => logs.push(m) });
+  const first = await collect(exec(baseCtx({ useResume: true, sessionId: "auto-1" })));
+  assert.equal(first.at(-1).result, "big");
+  assert.match(logs.join("\n"), /ctx=90000/);
+  await new Promise((r) => setTimeout(r, 5)); // let the background compaction start
+  const second = await collect(exec(baseCtx({ useResume: true, sessionId: "auto-1" })));
+  assert.equal(second.at(-1).result, "small");
+  assert.equal(ss.resolve("auto-1"), "agent-1");
+  assert.equal(state.sends[2].agentId, "agent-1");
+  assert.match(logs.join("\n"), /compacted agent=auto-1 -> agent-1/);
+});
+
+test("below the threshold (or with it off) nothing is compacted", async () => {
+  const usage = { inputTokens: 1000, outputTokens: 1 };
+  const { sdk, state } = fakeSdk([{ result: { status: "finished", result: "a", usage } }, { result: { status: "finished", result: "b", usage: { inputTokens: 500_000 } } }]);
+  const ss = new SessionState();
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss, autoCompactTokens: 80_000, compactDelayMs: 0 });
+  await collect(exec(baseCtx({ useResume: true, sessionId: "q-1" })));
+  const off = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss, compactDelayMs: 0 });
+  await collect(off(baseCtx({ useResume: true, sessionId: "q-1" })));
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(state.sends.length, 2);
+  assert.equal(ss.resolve("q-1"), "q-1");
+});
+
+test("tool lists saved by a previous run are used on the first turn after a restart", async () => {
+  const ss = new SessionState();
+  const key = ToolListCache.key("/w", undefined);
+  ss.setTools(key, [{ name: "message" }]);
+  const cache = new ToolListCache();
+  cache.persistTo(ss);
+  let listed = 0;
+  const r = await cache.get(key, async () => { listed += 1; return [{ name: "message" }, { name: "new" }]; });
+  assert.equal(r.cached, true);
+  assert.deepEqual(r.tools, [{ name: "message" }]);
+  await new Promise((res) => setTimeout(res, 0));
+  assert.equal(listed, 1); // refreshed in the background
+  assert.deepEqual(ss.tools(key), [{ name: "message" }, { name: "new" }]);
+});
+
+test("prewarm reopens recent agents once per process", async () => {
+  const { sdk, state } = fakeSdk([]);
+  const ss = new SessionState();
+  ss.noteAgent("warm-1", "/w", { id: "claude-opus-5-5" });
+  ss.noteAgent("warm-2", "/w2", { id: "claude-opus-5-5" });
+  const cache = new AgentCache({ idleMs: 0 });
+  const r = await prewarmSdk({ sdk, cache, state: ss, apiKeyFile: undefined });
+  assert.equal(r.agents, 2);
+  assert.equal(state.resumed, 2);
+  assert.ok(cache.get("warm-1", "/w"));
+  assert.equal(await prewarmSdk({ sdk, cache, state: ss }), r); // second call is the same promise
 });

@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [Semantic Versioning](https://semver.org/) (0.x: minor versions may break).
 
+## [0.4.7] - 2026-11-10
+
+### Added
+- Compaction for Cursor sessions, modelled on `claude-cli`. The backend declares
+  OpenClaw's `manualCompaction`, so `/compact [instructions]` asks the Cursor
+  agent for a continuation summary, opens a fresh agent, and reports Claude
+  Code's `compact_boundary` event. The successor's first turn receives the system
+  prompt and the summary. Turns that still carry the old session id are routed to
+  the successor; a turn arriving during a compaction waits for it.
+- Automatic background compaction once one model call carries more than
+  `autoCompactTokens` context tokens (default 80000, `0` turns it off). In
+  production the WeChat agent reached ~107K tokens per call and Cursor's first
+  response took 15–25 s, against 6–7 s for a fresh agent; Cursor's own
+  summarisation only starts near the 300K window.
+- Warm restarts: recent agents, compaction aliases/seeds and OpenClaw tool
+  definitions persist in `~/.cache/openclaw-cursor-runtime/state.json` (mode
+  0600, no credentials; `persistState`, `stateFile`). After start-up the plugin
+  reopens recent agents (`prewarm`, `prewarmDelaySeconds`, default 180 s, once per
+  process), and the first turn uses the saved tool list while refreshing it.
+- The `cursor-cli: timing` line reports the turn's per-call context as `ctx=`.
+
 ## [0.4.6] - 2026-11-10
 
 ### Fixed

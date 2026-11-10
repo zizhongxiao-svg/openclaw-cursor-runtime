@@ -1,7 +1,8 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createAcpExecute } from "./lib/acp-runtime.js";
-import { createSdkExecute } from "./lib/sdk-runtime.js";
+import { createSdkExecute, prewarmSdk } from "./lib/sdk-runtime.js";
+import { defaultStateFile } from "./lib/session-state.js";
 import { IMAGE_ARG } from "./lib/common.js";
 import { planToolAvailability, projectCursorNativeToolAuthority } from "./lib/tool-policy.js";
 
@@ -19,6 +20,23 @@ function str(v) {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
+const DEFAULT_AUTO_COMPACT_TOKENS = 80000;
+const DEFAULT_PREWARM_DELAY_S = 180;
+const PREWARM_SCHEDULED = Symbol.for("openclaw-cursor-runtime.prewarmScheduled");
+
+/**
+ * Reopen recent Cursor agents a while after start-up, once per process (the plugin may be
+ * registered several times). The delay keeps it out of the gateway's busy start-up phase.
+ */
+function schedulePrewarm(sdkOptions, delaySeconds, log) {
+  if (globalThis[PREWARM_SCHEDULED]) return;
+  globalThis[PREWARM_SCHEDULED] = true;
+  const delay = typeof delaySeconds === "number" && delaySeconds >= 0 ? delaySeconds : DEFAULT_PREWARM_DELAY_S;
+  const timer = setTimeout(() => { prewarmSdk(sdkOptions); }, delay * 1000);
+  timer.unref?.();
+  log?.(`cursor-cli: prewarm scheduled in ${delay} s`);
+}
+
 function buildCursorCliBackend(pluginConfig = {}, log) {
   const command = str(pluginConfig.command);
   const apiKeyFile = str(pluginConfig.apiKeyFile);
@@ -32,14 +50,19 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
   if (apiKeyFile) env.OPENCLAW_CURSOR_API_KEY_FILE = apiKeyFile;
   const base = [WRAPPER, "-p", "--trust", ...(force ? ["--force"] : []), "--output-format", "stream-json"];
 
-  const sdkExecute = createSdkExecute({
+  const sdkOptions = {
     apiKeyFile,
     useHttp1: pluginConfig.useHttp1 !== false,
     modelDefaults: pluginConfig.modelDefaults,
     finishOnFinalMessage: pluginConfig.finishOnFinalMessage !== false,
     ...(typeof pluginConfig.agentIdleMinutes === "number" ? { agentIdleMs: pluginConfig.agentIdleMinutes * 60 * 1000 } : {}),
+    // Agents, compaction aliases/seeds and tool definitions survive gateway restarts.
+    ...(pluginConfig.persistState !== false ? { stateFile: str(pluginConfig.stateFile) ?? defaultStateFile() } : {}),
+    autoCompactTokens: typeof pluginConfig.autoCompactTokens === "number" ? pluginConfig.autoCompactTokens : DEFAULT_AUTO_COMPACT_TOKENS,
     log,
-  });
+  };
+  const sdkExecute = createSdkExecute(sdkOptions);
+  if (transport === "sdk" && pluginConfig.prewarm !== false) schedulePrewarm(sdkOptions, pluginConfig.prewarmDelaySeconds, log);
   const acpExecute = createAcpExecute({
     command,
     apiKeyFile,
@@ -87,6 +110,20 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
     ...(transport !== "print"
       ? {
           ownsNativeCompaction: true,
+          // OpenClaw's /compact: the prompt reaches execute(), which summarises the Cursor
+          // agent into a fresh one and reports Claude Code's compact_boundary event.
+          ...(transport === "sdk"
+            ? {
+                manualCompaction: {
+                  buildPrompt: (customInstructions) => {
+                    const instructions = customInstructions?.trim();
+                    return instructions ? `/compact ${instructions}` : "/compact";
+                  },
+                  input: "stdin",
+                  validateOutput: validateCompactOutput,
+                },
+              }
+            : {}),
           // The turn's OpenClaw loopback MCP grant, handed over as a Claude-style --mcp-config file.
           bundleMcp: true,
           bundleMcpMode: "claude-config-file",
@@ -126,7 +163,18 @@ function buildCursorCliBackend(pluginConfig = {}, log) {
   };
 }
 
-export { buildCursorCliBackend };
+/** manualCompaction.validateOutput: confirm execute() reported a finished compaction. */
+function validateCompactOutput(rawOutput) {
+  for (const line of String(rawOutput ?? "").split("\n")) {
+    try {
+      const event = JSON.parse(line);
+      if (event.compact_result === "success" || (event.type === "system" && event.subtype === "compact_boundary")) return { ok: true };
+    } catch {}
+  }
+  return { ok: false, reason: "cursor-cli did not confirm that compaction ran." };
+}
+
+export { buildCursorCliBackend, validateCompactOutput };
 
 export default {
   id: "cursor-cli",

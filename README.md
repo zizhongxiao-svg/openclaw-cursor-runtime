@@ -48,6 +48,16 @@ refs look like `cursor-cli/<model>`.
   works when a Cursor team policy blocks MCP servers.
 - **Long-lived sessions.** One Cursor agent per OpenClaw session. A session reset
   reseeds the new agent from the OpenClaw transcript.
+- **Compaction, like `claude-cli`.** `/compact [instructions]` asks the Cursor
+  agent for a continuation summary and moves the session to a fresh agent that
+  starts from it. The same runs automatically in the background once one model
+  call carries more than `autoCompactTokens` (default 80K): Cursor's first
+  response grows from about 6 s to 15–25 s at around 100K tokens, long before its
+  own summarisation near the window limit.
+- **Warm restarts.** Recent agents, compaction state and OpenClaw tool
+  definitions (names, descriptions, schemas; never credentials) are kept in
+  `~/.cache/openclaw-cursor-runtime/state.json`. A few minutes after start-up the
+  plugin reopens recent agents, and the first turn uses the saved tool list.
 - **Tool caps.** Automations, cron jobs and restricted runs are enforced or
   refused (fail closed). See [Security model](#security-model).
 - **`/think` maps to Cursor effort** (`low` … `max`). A model catalog gives
@@ -128,6 +138,9 @@ gateway instead once it is idle.
           // useHttp1: true,                        // process-wide, read once
           // modelDefaults: { context: "300k" },    // default context for claude-* models
           // agentIdleMinutes: 360,                 // close idle cached agents
+          // autoCompactTokens: 80000,              // background compaction threshold (0: off)
+          // prewarm: true, prewarmDelaySeconds: 180,
+          // persistState: true,                    // stateFile: "~/.cache/openclaw-cursor-runtime/state.json"
         },
       },
     },

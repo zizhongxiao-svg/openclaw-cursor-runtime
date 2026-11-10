@@ -2,7 +2,7 @@
   "id": "cursor-cli",
   "name": "Cursor Runtime",
   "description": "Run Cursor agents as an OpenClaw model runtime",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "cliBackends": [
     "cursor-cli"
   ],
@@ -80,6 +80,28 @@
       "finishOnFinalMessage": {
         "type": "boolean",
         "description": "sdk transport: end the turn as soon as the agent delivers its answer with message(final:true), skipping the wrap-up model call that only returns NO_REPLY (default true)"
+      },
+      "autoCompactTokens": {
+        "type": "number",
+        "minimum": 0,
+        "description": "sdk transport: compact a session in the background once one model call carries more than this many context tokens (default 80000; 0 turns automatic compaction off). /compact always works."
+      },
+      "persistState": {
+        "type": "boolean",
+        "description": "sdk transport: keep recent agents, compaction state and tool definitions in a state file across gateway restarts (default true)"
+      },
+      "stateFile": {
+        "type": "string",
+        "description": "sdk transport: state file path (default ~/.cache/openclaw-cursor-runtime/state.json)"
+      },
+      "prewarm": {
+        "type": "boolean",
+        "description": "sdk transport: reopen recently used Cursor agents after gateway start-up (default true)"
+      },
+      "prewarmDelaySeconds": {
+        "type": "number",
+        "minimum": 0,
+        "description": "sdk transport: seconds after start-up before the prewarm runs (default 180)"
       }
     }
   },
