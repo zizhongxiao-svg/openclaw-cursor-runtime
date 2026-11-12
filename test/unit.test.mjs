@@ -42,7 +42,7 @@ test("ToolListCache: first turn waits for the list, later turns use the cache an
 });
 import { applyThinking, pickPermissionOption, resolveAcpModelId } from "../lib/acp-runtime.js";
 import { McpRelay, extractMcpConfigPaths, toAcpMcpServer } from "../lib/mcp-relay.js";
-import { childEnv, readApiKey } from "../lib/common.js";
+import { childEnv, PACKAGE_VERSION, readApiKey } from "../lib/common.js";
 import {
   CURSOR_NATIVE_TOOL_NAMES,
   observeNativeTool,
@@ -68,29 +68,55 @@ process.env.OPENCLAW_CURSOR_STATE_FILE = path.join(fs.mkdtempSync(path.join(os.t
  */
 let fakeRunSeq = 0;
 function fakeSdk(script) {
-  const state = { created: 0, resumed: 0, sends: [], runs: [], agents: [], events: [] };
+  const state = { created: 0, resumed: 0, sends: [], runs: [], agents: [], events: [], active: new Set() };
   class FakeRun {
-    constructor(b) { this.b = b; this.cancelled = false; this.requestId = `fake-run-${++fakeRunSeq}`; }
+    constructor(b, agentId, options) {
+      this.b = b;
+      this.agentId = agentId;
+      this.options = options;
+      this.cancelled = false;
+      this.requestId = `fake-run-${++fakeRunSeq}`;
+      this.stopped = Promise.withResolvers();
+    }
     async *stream() {
       for (let i = 0; i < (this.b.silentAttempts ?? 0); i++) silentRunSse(this.b.streamUrl, this.requestId);
       for (let i = 0; i < (this.b.streamAttempts ?? 0); i++) await postRunSse(this.b.streamUrl, this.requestId);
       if (this.b.firstEventDelayMs) await new Promise((r) => setTimeout(r, this.b.firstEventDelayMs));
+      for (const item of this.b.timeline ?? []) {
+        if (item.delayMs) await new Promise((r) => setTimeout(r, item.delayMs));
+        if (item.update) await this.options.onDelta?.({ update: item.update });
+        if (item.event) yield item.event;
+      }
       for (const m of this.b.events ?? []) yield m;
-      if (this.b.hang) await new Promise((r) => { this.release = r; });
+      if (this.b.hang && !this.cancelled) await this.stopped.promise;
     }
-    async wait() { return this.b.result ?? { status: this.cancelled ? "cancelled" : "finished", result: "ok" }; }
-    async cancel() { this.cancelled = true; this.release?.(); }
+    async wait() {
+      if (this.b.waitDelayMs) await new Promise((r) => setTimeout(r, this.b.waitDelayMs));
+      state.active.delete(this.agentId);
+      return this.b.result ?? { status: this.cancelled ? "cancelled" : "finished", result: "ok" };
+    }
+    async cancel() {
+      this.b.onCancel?.();
+      if (this.b.cancelGate) await this.b.cancelGate;
+      if (this.b.throwOnCancel) throw new Error(this.b.throwOnCancel);
+      this.cancelled = true;
+      this.stopped.resolve();
+    }
   }
   class FakeAgent {
     constructor(id) { this.agentId = id; this.closed = false; state.agents.push(this); }
     async send(message, options) {
+      if (state.active.has(this.agentId)) throw new Error(`Agent ${this.agentId} already has active run`);
       state.sends.push({ message, options, agentId: this.agentId });
       const b = script.shift() ?? {};
+      b.onSend?.();
+      if (b.sendGate) await b.sendGate;
       if (b.sendDelayMs) await new Promise((r) => setTimeout(r, b.sendDelayMs));
       if (b.throwOnSend) throw new Error(b.throwOnSend);
       if (b.callTool) b.toolResult = await options.local.customTools[b.callTool].execute(b.callArgs ?? { text: "hi" }, {});
-      const run = new FakeRun(b);
+      const run = new FakeRun(b, this.agentId, options);
       state.runs.push(run);
+      state.active.add(this.agentId);
       return run;
     }
     close() { this.closed = true; }
@@ -138,6 +164,10 @@ async function collect(gen) {
   const out = [];
   for await (const r of gen) out.push(r);
   return out;
+}
+
+function turnMetrics(logs) {
+  return logs.filter((line) => line.startsWith("cursor-cli: timing")).map((line) => JSON.parse(line.slice(line.indexOf(" metrics=") + 9)));
 }
 
 // ---------------------------------------------------------------- model selection & text
@@ -226,6 +256,30 @@ test("execute: streams text, reports init tools and a terminal result", async ()
   assert.match(state.sends[0].message, /<system_instructions>\nSYS/);
 });
 
+test("execute: thinking and concurrent tool progress reach OpenClaw without duplicate tool events", async () => {
+  const { sdk } = fakeSdk([{
+    events: [
+      { type: "thinking", text: "Checking " },
+      { type: "thinking", text: "two files." },
+      { type: "tool_call", name: "read", call_id: "a", status: "running", args: { path: "a.txt" } },
+      { type: "tool_call", name: "read", call_id: "a", status: "running", args: { path: "a.txt" } },
+      { type: "tool_call", name: "read", call_id: "b", status: "running", args: { path: "b.txt" } },
+      { type: "tool_call", name: "read", call_id: "b", status: "error", result: { error: "missing" } },
+      { type: "tool_call", name: "read", call_id: "a", status: "completed", result: "file contents" },
+      { type: "tool_call", name: "read", call_id: "a", status: "completed", result: "file contents" },
+      { type: "assistant", message: { content: [{ type: "text", text: "Done." }] } },
+    ],
+    result: { status: "finished", result: "Done." },
+  }]);
+  const out = await collect(createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }) })(baseCtx()));
+  assert.equal(out.filter((m) => m.event?.delta?.type === "thinking_delta").map((m) => m.event.delta.thinking).join(""), "Checking two files.");
+  const starts = out.filter((m) => m.type === "assistant").flatMap((m) => m.message.content);
+  assert.deepEqual(starts.map((m) => [m.id, m.name, m.input]), [["a", "read", { path: "a.txt" }], ["b", "read", { path: "b.txt" }]]);
+  const results = out.filter((m) => m.type === "user").flatMap((m) => m.message.content);
+  assert.deepEqual(results.map((m) => [m.tool_use_id, m.is_error, m.content]), [["b", true, '{"error":"missing"}'], ["a", false, "file contents"]]);
+  assert.equal(out.filter((m) => m.event?.delta?.type === "text_delta").map((m) => m.event.delta.text).join(""), "Done.");
+});
+
 test("execute: auth error before any progress is retried once (status error and thrown)", async () => {
   for (const first of [{ result: { status: "error", error: { message: "Authentication error If you are logged in, try logging out and back in." } } }, { throwOnSend: "Authentication error" }]) {
     const { sdk, state } = fakeSdk([first, { result: { status: "finished", result: "ok" } }]);
@@ -284,6 +338,60 @@ test("execute: the timing line counts the Cursor stream attempts of the turn's r
   }
 });
 
+test("execute: timing separates queueing, SDK activity, visible text and terminal settlement", async () => {
+  const { sdk } = fakeSdk([{
+    sendDelayMs: 20,
+    waitDelayMs: 25,
+    timeline: [
+      { event: { type: "status", status: "RUNNING" } },
+      { delayMs: 25, update: { type: "thinking-delta", text: "Working" }, event: { type: "thinking", text: "Working" } },
+      { delayMs: 25, update: { type: "step-completed", stepId: 7, stepDurationMs: 50 }, event: { type: "assistant", message: { content: [{ type: "text", text: "OK" }] } } },
+    ],
+  }]);
+  const cache = new AgentCache({ idleMs: 0 });
+  const agent = await sdk.Agent.create();
+  cache.set(agent, "/tmp");
+  const release = await cache.lock(agent.agentId, "/tmp");
+  const logs = [];
+  const exec = createSdkExecute({ sdk, cache, state: new SessionState(), log: (line) => logs.push(line) });
+  const done = collect(exec(baseCtx({ useResume: true, sessionId: agent.agentId })));
+  try {
+    await new Promise((r) => setTimeout(r, 40));
+  } finally {
+    release();
+  }
+  await done;
+  const [m] = turnMetrics(logs);
+  assert.equal(turnMetrics(logs).length, 1);
+  assert.equal(m.outcome, "success");
+  assert.equal(m.agentMode, "cached");
+  assert.ok(m.queueMs >= 30, JSON.stringify(m));
+  assert.equal(m.openMs, 0);
+  assert.ok(m.sendMs >= 15);
+  assert.ok(m.firstThinkingMs >= m.firstEventMs + 20);
+  assert.ok(m.firstTextMs >= m.firstThinkingMs + 20);
+  assert.ok(m.textWaitMs >= 40);
+  assert.ok(m.streamMs >= 40);
+  assert.ok(m.waitMs >= 20);
+  assert.ok(m.resultMs >= m.firstTextMs + 20);
+  assert.equal(m.steps, 1);
+  assert.equal(m.sdkStepMs, 50);
+});
+
+test("execute: failed sends still log timing without recording prompt content", async () => {
+  const logs = [];
+  const { sdk } = fakeSdk([{ sendDelayMs: 20, throwOnSend: "connection failed" }]);
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), log: (line) => logs.push(line) });
+  await assert.rejects(collect(exec(baseCtx({ prompt: "private benchmark fixture" }))), /connection failed/);
+  const [m] = turnMetrics(logs);
+  assert.equal(turnMetrics(logs).length, 1);
+  assert.equal(m.outcome, "error");
+  assert.equal(m.phase, "send");
+  assert.ok(m.sendMs >= 15);
+  assert.equal(m.firstTextMs, undefined);
+  assert.doesNotMatch(logs.join("\n"), /private benchmark fixture/);
+});
+
 test("execute: no retry once text or tools ran, and non-auth errors propagate", async () => {
   {
     const { sdk, state } = fakeSdk([{ events: [{ type: "assistant", message: { content: [{ type: "text", text: "partial" }] } }], result: { status: "error", error: { message: "Authentication error" } } }]);
@@ -327,6 +435,214 @@ test("execute: an already-aborted signal never sends", async () => {
   assert.equal(state.sends.length, 0);
 });
 
+test("execute: queues the same session without blocking another session", async () => {
+  const started = Promise.withResolvers();
+  const { sdk, state } = fakeSdk([
+    { onSend: started.resolve, hang: true },
+    { result: { status: "finished", result: "other" } },
+    { result: { status: "finished", result: "next" } },
+  ]);
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: new SessionState() });
+  const ac = new AbortController();
+  const ctx = (sessionId, extra = {}) => baseCtx({ useResume: true, sessionId, ...extra });
+  const first = collect(exec(ctx("queue-1", { abortSignal: ac.signal })));
+  await started.promise;
+  const next = collect(exec(ctx("queue-1")));
+  try {
+    const other = await collect(exec(ctx("queue-2")));
+    assert.equal(other.at(-1).result, "other");
+    assert.deepEqual(state.sends.map((s) => s.agentId), ["queue-1", "queue-2"]);
+  } finally {
+    ac.abort(new Error("stop first"));
+    await assert.rejects(first, /stop first/);
+  }
+  assert.equal((await next).at(-1).result, "next");
+  assert.equal(state.sends.at(-1).agentId, "queue-1");
+});
+
+test("execute: an aborted queue waiter does not release another turn's lock", async () => {
+  const started = Promise.withResolvers();
+  const { sdk, state } = fakeSdk([{ onSend: started.resolve, hang: true }, {}]);
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: new SessionState() });
+  const firstAbort = new AbortController();
+  const waiterAbort = new AbortController();
+  const ctx = (abortSignal) => baseCtx({ useResume: true, sessionId: "queue-abort", abortSignal });
+  const first = collect(exec(ctx(firstAbort.signal)));
+  await started.promise;
+  const waiter = collect(exec(ctx(waiterAbort.signal)));
+  const last = collect(exec(ctx()));
+  waiterAbort.abort(new Error("cancel queued turn"));
+  try {
+    await assert.rejects(waiter, /cancel queued turn/);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(state.sends.length, 1);
+  } finally {
+    firstAbort.abort(new Error("stop owner"));
+    await assert.rejects(first, /stop owner/);
+  }
+  assert.equal((await last).at(-1).result, "ok");
+  assert.equal(state.sends.length, 2);
+});
+
+test("execute: an alias changed while queued must acquire the successor's lock", async () => {
+  const { sdk, state } = fakeSdk([{}]);
+  const cache = new AgentCache({ idleMs: 0 });
+  const ss = new SessionState();
+  const releaseOld = await cache.lock("old-alias", "/tmp");
+  const releaseNew = await cache.lock("new-alias", "/tmp");
+  const exec = createSdkExecute({ sdk, cache, state: ss });
+  const done = collect(exec(baseCtx({ useResume: true, sessionId: "old-alias" })));
+  try {
+    await new Promise((r) => setImmediate(r));
+    ss.setAlias("old-alias", "new-alias");
+    releaseOld();
+    await new Promise((r) => setImmediate(r));
+    assert.equal(state.sends.length, 0);
+  } finally {
+    releaseOld();
+    releaseNew();
+  }
+  assert.equal((await done)[0].session_id, "new-alias");
+  assert.equal(state.sends[0].agentId, "new-alias");
+});
+
+test("execute: abort during send returns promptly and cancels the late run before reuse", async () => {
+  const started = Promise.withResolvers();
+  const sendGate = Promise.withResolvers();
+  const { sdk, state } = fakeSdk([{ onSend: started.resolve, sendGate: sendGate.promise }, {}]);
+  const cache = new AgentCache({ idleMs: 0 });
+  const logs = [];
+  const exec = createSdkExecute({ sdk, cache, state: new SessionState(), log: (m) => logs.push(m) });
+  const ac = new AbortController();
+  const ctx = (abortSignal) => baseCtx({ useResume: true, sessionId: "late-send", abortSignal });
+  const done = collect(exec(ctx(ac.signal)));
+  await started.promise;
+  ac.abort(new Error("stop sending"));
+  try {
+    await assert.rejects(done, /stop sending/);
+    const [m] = turnMetrics(logs);
+    assert.equal(m.outcome, "cancelled");
+    assert.equal(m.phase, "send");
+    assert.ok(m.abortToReturnMs >= 0);
+    assert.equal(m.quarantined, true);
+    assert.equal(m.firstTextMs, undefined);
+    await assert.rejects(collect(exec(ctx())), /still settling/);
+    assert.equal(state.sends.length, 1);
+  } finally {
+    sendGate.resolve();
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.equal(state.runs[0].cancelled, true);
+  assert.equal((await collect(exec(ctx()))).at(-1).result, "ok");
+  assert.match(logs.join("\n"), /refusing to reuse/);
+});
+
+test("execute: failed cancellation is surfaced and the agent is not reused", async () => {
+  const started = Promise.withResolvers();
+  const { sdk, state } = fakeSdk([{ onSend: started.resolve, hang: true, throwOnCancel: "cancel failed" }]);
+  const cache = new AgentCache({ idleMs: 0 });
+  const exec = createSdkExecute({ sdk, cache, state: new SessionState() });
+  const ac = new AbortController();
+  const ctx = (abortSignal) => baseCtx({ useResume: true, sessionId: "bad-cancel", abortSignal });
+  const done = collect(exec(ctx(ac.signal)));
+  await started.promise;
+  await new Promise((r) => setImmediate(r));
+  ac.abort(new Error("stop"));
+  await assert.rejects(done, /cancel failed/);
+  await assert.rejects(collect(exec(ctx())), /refusing to reuse/);
+  assert.equal(state.sends.length, 1);
+  state.runs[0].stopped.resolve();
+  cache.closeAll();
+});
+
+test("execute: a cancellation timeout blocks reuse until late cleanup really finishes", async () => {
+  const started = Promise.withResolvers();
+  const cancelGate = Promise.withResolvers();
+  const { sdk, state } = fakeSdk([{ onSend: started.resolve, hang: true, cancelGate: cancelGate.promise }, {}]);
+  const cache = new AgentCache({ idleMs: 0 });
+  const exec = createSdkExecute({ sdk, cache, state: new SessionState() });
+  const ac = new AbortController();
+  const ctx = (abortSignal) => baseCtx({ useResume: true, sessionId: "slow-cancel", abortSignal });
+  const done = collect(exec(ctx(ac.signal)));
+  await started.promise;
+  await new Promise((r) => setImmediate(r));
+  // AbortSignal.timeout is unref'ed; keep the isolated test process alive for it.
+  const keepAlive = setTimeout(() => {}, 6000);
+  ac.abort(new Error("stop"));
+  try {
+    await assert.rejects(done, /still settling/);
+    await assert.rejects(collect(exec(ctx())), /refusing to reuse/);
+    assert.equal(state.sends.length, 1);
+  } finally {
+    clearTimeout(keepAlive);
+    cancelGate.resolve();
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.equal(state.runs[0].cancelled, true);
+  assert.equal((await collect(exec(ctx()))).at(-1).result, "ok");
+});
+
+test("execute: resume failures preserve the session id and do not create an empty agent", async () => {
+  const { sdk, state } = fakeSdk([{}]);
+  const resume = sdk.Agent.resume;
+  sdk.Agent.resume = async () => { throw new Error("temporary connection failure"); };
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: new SessionState() });
+  const ctx = () => baseCtx({ useResume: true, sessionId: "keep-history" });
+  await assert.rejects(collect(exec(ctx())), /preserving its history.*temporary connection failure/);
+  assert.equal(state.created, 0);
+  assert.equal(state.sends.length, 0);
+  sdk.Agent.resume = resume;
+  const out = await collect(exec(ctx()));
+  assert.equal(out[0].session_id, "keep-history");
+  assert.equal(state.sends[0].agentId, "keep-history");
+});
+
+test("execute: unavailable or malformed OpenClaw tools never fall back to native-only execution", async () => {
+  let mode;
+  const requests = [];
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (chunk) => { body += chunk; });
+    req.on("end", () => {
+      const m = JSON.parse(body);
+      requests.push(m.method);
+      const error = m.method === "initialize" && mode === "legacy" ? { code: -32601, message: "Method not found" }
+        : m.method === "initialize" && mode === "init-error" ? { code: -32000, message: "grant expired" }
+        : m.method === "tools/list" && mode === "list-error" ? { code: -32000, message: "grant expired" } : undefined;
+      const result = m.method === "tools/list" && mode !== "invalid-list" ? { tools: [{ name: "read" }] } : {};
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: m.id, ...(error ? { error } : { result }) }));
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ccli-mcp-failure-"));
+  const cfg = path.join(dir, "mcp.json");
+  fs.writeFileSync(cfg, JSON.stringify({ mcpServers: { openclaw: { url: `http://127.0.0.1:${server.address().port}/mcp` } } }));
+  try {
+    for (mode of ["init-error", "list-error", "invalid-list"]) {
+      requests.length = 0;
+      const logs = [];
+      const { sdk, state } = fakeSdk([{}]);
+      const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), toolListCache: false, log: (line) => logs.push(line) });
+      await assert.rejects(collect(exec(baseCtx({ args: ["--mcp-config", cfg] }))), /refusing to run without the requested tools/);
+      assert.equal(state.created, 0);
+      assert.equal(state.sends.length, 0);
+      assert.equal(turnMetrics(logs)[0].phase, "tools");
+      if (mode === "init-error") assert.deepEqual(requests, ["initialize"]);
+    }
+    mode = "legacy";
+    const { sdk, state } = fakeSdk([{}]);
+    const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), toolListCache: false });
+    assert.equal((await collect(exec(baseCtx({ args: ["--mcp-config", cfg] })))).at(-1).result, "ok");
+    assert.deepEqual(Object.keys(state.sends[0].options.local.customTools), ["read"]);
+    await assert.rejects(collect(exec(baseCtx({ args: ["--mcp-config", path.join(dir, "missing.json")] }))), /MCP configuration is unavailable/);
+    assert.equal(state.sends.length, 1);
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true });
+  }
+});
+
 test("execute: only allowed OpenClaw tools are registered and calls carry the turn grant", async () => {
   const seen = [];
   const server = http.createServer((req, res) => {
@@ -366,15 +682,51 @@ test("execute: only allowed OpenClaw tools are registered and calls carry the tu
       assert.ok(seen.some((s) => s.method === "tools/call"));
     }
     assert.ok(seen.length > 0 && seen.every((s) => s.auth === "Bearer turn-1"));
+    {
+      const call = { type: "tool_call", name: "mcp", call_id: "bridge-error", args: { providerIdentifier: "custom-user-tools", toolName: "message", args: { action: "send", message: "fixture" } } };
+      const { sdk } = fakeSdk([{
+        events: [
+          { ...call, status: "running" },
+          { ...call, status: "completed", result: { status: "success", value: { isError: true, content: [] } } },
+        ],
+      }]);
+      const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }) });
+      const out = await collect(exec(baseCtx({ args, openClawAllow: new Set(["message"]) })));
+      const tool = out.find((m) => m.type === "assistant").message.content[0];
+      assert.equal(tool.name, "mcp__openclaw__message");
+      assert.deepEqual(tool.input, call.args.args);
+      assert.equal(out.find((m) => m.type === "user").message.content[0].is_error, true);
+    }
     // message(final:true) delivered: the turn ends at once with NO_REPLY and the
     // still-running Cursor run (the NO_REPLY wrap-up call) is cancelled.
     {
-      const { sdk, state } = fakeSdk([{ callTool: "message", callArgs: { action: "send", message: "答复", final: true }, events: [{ type: "tool_call", name: "mcp", call_id: "m1", status: "completed" }], hang: true }]);
+      const cancelling = Promise.withResolvers();
+      const cancelGate = Promise.withResolvers();
+      const { sdk, state } = fakeSdk([{
+        callTool: "message", callArgs: { action: "send", message: "答复", final: true },
+        events: [{ type: "tool_call", name: "mcp", call_id: "m1", status: "completed" }],
+        hang: true, onCancel: cancelling.resolve, cancelGate: cancelGate.promise,
+        result: { status: "cancelled", usage: { inputTokens: 500, outputTokens: 20 } },
+      }]);
       const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }) });
-      const out = await collect(exec(baseCtx({ args, openClawAllow: new Set(["message"]) })));
+      let completed = false;
+      const done = collect(exec(baseCtx({ args, openClawAllow: new Set(["message"]) }))).then((out) => { completed = true; return out; });
+      await cancelling.promise;
+      try {
+        await new Promise((r) => setImmediate(r));
+        assert.equal(completed, false);
+        assert.equal(state.active.size, 1);
+      } finally {
+        cancelGate.resolve();
+      }
+      const out = await done;
       assert.equal(out.at(-1).type, "result");
       assert.equal(out.at(-1).result, "NO_REPLY");
+      assert.equal(out.at(-1).usage.input_tokens, 500);
       assert.equal(state.runs[0].cancelled, true);
+      assert.equal(state.active.size, 0);
+      const next = await collect(exec(baseCtx({ useResume: true, sessionId: out[0].session_id })));
+      assert.equal(next.at(-1).result, "ok");
     }
     // Progress updates (final:false) do not end the turn; the option can be turned off.
     {
@@ -598,6 +950,35 @@ test("duplicate module loads share one agent cache (no re-resume on the second c
   assert.equal(new Set(state.sends.map((s) => s.agentId)).size, 1);
 });
 
+test("same-version reload isolates legacy caches while preserving aliases and warm reuse", async (t) => {
+  const key = Symbol.for(`openclaw-cursor-runtime.shared@${PACKAGE_VERSION}`);
+  const previous = globalThis[key];
+  const legacy = { agentCache: new AgentCache({ idleMs: 0 }), state: new SessionState(), loads: 0 };
+  legacy.agentCache.lock = undefined;
+  legacy.agentCache.markUnsettled = undefined;
+  legacy.state.setAlias("before-compaction", "saved-agent");
+  globalThis[key] = legacy;
+  t.after(() => {
+    legacy.agentCacheV2?.closeAll();
+    if (previous === undefined) delete globalThis[key];
+    else globalThis[key] = previous;
+  });
+  const copyA = await import("../lib/sdk-runtime.js?copy=legacy-reload-a");
+  const copyB = await import("../lib/sdk-runtime.js?copy=legacy-reload-b");
+  const { sdk, state } = fakeSdk([
+    { result: { status: "finished", result: "resumed" } },
+    { result: { status: "finished", result: "cached" } },
+  ]);
+  const ctx = () => baseCtx({ useResume: true, sessionId: "before-compaction", cwd: "/tmp/legacy-reload" });
+  const execA = copyA.createSdkExecute({ sdk, agentIdleMs: 0 });
+  const execB = copyB.createSdkExecute({ sdk, agentIdleMs: 0 });
+  assert.equal((await collect(execA(ctx()))).at(-1).result, "resumed");
+  assert.equal((await collect(execB(ctx()))).at(-1).result, "cached");
+  assert.equal(state.created, 0);
+  assert.equal(state.resumed, 1);
+  assert.deepEqual(state.sends.map((s) => s.agentId), ["saved-agent", "saved-agent"]);
+});
+
 // ---------------------------------------------------------------- compaction, state, prewarm
 
 const SUMMARY = `User prefers Chinese replies. Goal: ship 0.4.7. Paths: /tmp/x. ${"detail ".repeat(40)}`;
@@ -642,6 +1023,17 @@ test("backend declares manual compaction and validates the compact_boundary even
   assert.equal(buildCursorCliBackend({ transport: "acp", prewarm: false }).manualCompaction, undefined);
 });
 
+test("/compact does not discover OpenClaw tools that the summary run will not use", async () => {
+  const { sdk, state } = fakeSdk([]);
+  const logs = [];
+  const execute = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: new SessionState(), log: (line) => logs.push(line) });
+  const out = await collect(execute(baseCtx({ prompt: "/compact", args: ["--mcp-config", "/missing/expired-turn-grant.json"] })));
+  assert.equal(out.at(-1).compact_result, "success");
+  assert.equal(state.sends.length, 0);
+  assert.equal(turnMetrics(logs)[0].operation, "compact");
+  assert.equal(turnMetrics(logs)[0].outcome, "success");
+});
+
 test("/compact summarises into a fresh agent; the next turn continues there with the summary", async () => {
   const { sdk, state } = fakeSdk([
     { events: [{ type: "assistant", message: { content: [{ type: "text", text: SUMMARY }] } }], result: { status: "finished", result: SUMMARY } },
@@ -678,6 +1070,43 @@ test("/compact with a short or failed summary keeps the old agent", async () => 
   assert.equal(state.created, 0);
 });
 
+test("/compact is cancelled with its turn and leaves the original session intact", async () => {
+  const started = Promise.withResolvers();
+  const { sdk, state } = fakeSdk([{ onSend: started.resolve, hang: true }, {}]);
+  const ss = new SessionState();
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss });
+  const ac = new AbortController();
+  const done = collect(exec(baseCtx({ useResume: true, sessionId: "cancel-compact", prompt: "/compact", abortSignal: ac.signal })));
+  await started.promise;
+  await new Promise((r) => setImmediate(r));
+  ac.abort(new Error("stop compaction"));
+  await assert.rejects(done, /stop compaction/);
+  assert.equal(state.runs[0].cancelled, true);
+  assert.equal(state.created, 0);
+  assert.equal(ss.resolve("cancel-compact"), "cancel-compact");
+  const next = await collect(exec(baseCtx({ useResume: true, sessionId: "cancel-compact" })));
+  assert.equal(next[0].session_id, "cancel-compact");
+});
+
+test("/compact aborted during successor creation disposes it without changing aliases", async () => {
+  const { sdk, state } = fakeSdk([{ result: { status: "finished", result: SUMMARY } }]);
+  const ss = new SessionState();
+  const ac = new AbortController();
+  const create = sdk.Agent.create;
+  sdk.Agent.create = async (...args) => {
+    const agent = await create(...args);
+    ac.abort(new Error("stop before replacing session"));
+    return agent;
+  };
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss });
+  await assert.rejects(collect(exec(baseCtx({
+    useResume: true, sessionId: "keep-compact", prompt: "/compact", abortSignal: ac.signal,
+  }))), /stop before replacing session/);
+  assert.equal(ss.resolve("keep-compact"), "keep-compact");
+  assert.equal(ss.seed("agent-1"), undefined);
+  assert.equal(state.agents.find((a) => a.agentId === "agent-1").disposed, true);
+});
+
 test("auto-compaction runs in the background past the threshold; the next turn waits for it", async () => {
   const usage = { inputTokens: 90_000, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const { sdk, state } = fakeSdk([
@@ -687,12 +1116,14 @@ test("auto-compaction runs in the background past the threshold; the next turn w
   ]);
   const ss = new SessionState();
   const logs = [];
-  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss, autoCompactTokens: 80_000, compactDelayMs: 0, log: (m) => logs.push(m) });
+  const exec = createSdkExecute({ sdk, cache: new AgentCache({ idleMs: 0 }), state: ss, autoCompactTokens: 80_000, compactDelayMs: 20, log: (m) => logs.push(m) });
   const first = await collect(exec(baseCtx({ useResume: true, sessionId: "auto-1" })));
   assert.equal(first.at(-1).result, "big");
   assert.match(logs.join("\n"), /ctx=90000/);
-  await new Promise((r) => setTimeout(r, 5)); // let the background compaction start
-  const second = await collect(exec(baseCtx({ useResume: true, sessionId: "auto-1" })));
+  const next = collect(exec(baseCtx({ useResume: true, sessionId: "auto-1" })));
+  // A turn arriving inside the startup delay must not race the summary send.
+  await new Promise((r) => setTimeout(r, 30));
+  const second = await next;
   assert.equal(second.at(-1).result, "small");
   assert.equal(ss.resolve("auto-1"), "agent-1");
   assert.equal(state.sends[2].agentId, "agent-1");
